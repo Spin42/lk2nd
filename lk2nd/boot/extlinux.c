@@ -38,6 +38,9 @@ enum token {
 	CMD_FDT,
 	CMD_FDTDIR,
 	CMD_FDTOVERLAY,
+	CMD_RAUC_UBOOT_PART,    /* RAUC U-Boot env partition name */
+	CMD_RAUC_UBOOT_OFFSET,  /* RAUC U-Boot env offset in bytes */
+	CMD_RAUC_UBOOT_SIZE,    /* RAUC U-Boot env size in bytes */
 	CMD_UNKNOWN,
 };
 
@@ -57,6 +60,9 @@ static const struct {
 	{"devicetree-overlay",	CMD_FDTOVERLAY},
 	{"initrd",		CMD_INITRD},
 	{"append",		CMD_APPEND},
+	{"rauc_uboot_part",	CMD_RAUC_UBOOT_PART},
+	{"rauc_uboot_offset",	CMD_RAUC_UBOOT_OFFSET},
+	{"rauc_uboot_size",	CMD_RAUC_UBOOT_SIZE},
 };
 
 static enum token cmd_to_tok(char *command)
@@ -71,6 +77,40 @@ static enum token cmd_to_tok(char *command)
 }
 
 #define EOF -1
+
+/* Parse unsigned 64-bit value from string (supports hex with 0x prefix) */
+static uint64_t parse_u64(const char *str)
+{
+	uint64_t val = 0;
+	int base = 10;
+
+	if (!str)
+		return 0;
+
+	/* Check for hex prefix */
+	if (str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) {
+		base = 16;
+		str += 2;
+	}
+
+	while (*str) {
+		int digit;
+
+		if (*str >= '0' && *str <= '9')
+			digit = *str - '0';
+		else if (base == 16 && *str >= 'a' && *str <= 'f')
+			digit = *str - 'a' + 10;
+		else if (base == 16 && *str >= 'A' && *str <= 'F')
+			digit = *str - 'A' + 10;
+		else
+			break;
+
+		val = val * base + digit;
+		str++;
+	}
+
+	return val;
+}
 
 /**
  * parse_char() - Get one char from the file.
@@ -225,6 +265,11 @@ static int parse_conf(char *data, size_t size, struct label *label)
 	int label_idx;
 	int i;
 
+	/* RAUC U-Boot environment configuration (global directives) */
+	const char *rauc_uboot_part = NULL;
+	uint64_t rauc_uboot_offset = 0;
+	size_t rauc_uboot_size = 0;
+
 	commands_count = count_lines(data, size);
 	commands = calloc(commands_count, sizeof(*commands));
 
@@ -261,6 +306,15 @@ static int parse_conf(char *data, size_t size, struct label *label)
 	for (i = 0; i < commands_count; ++i) {
 		if (commands[i].cmd == CMD_DEFAULT) {
 			default_name = commands[i].val;
+		} else if (commands[i].cmd == CMD_RAUC_UBOOT_PART) {
+			/* Global RAUC directive: U-Boot env partition */
+			rauc_uboot_part = commands[i].val;
+		} else if (commands[i].cmd == CMD_RAUC_UBOOT_OFFSET) {
+			/* Global RAUC directive: U-Boot env offset (supports hex with 0x prefix) */
+			rauc_uboot_offset = parse_u64(commands[i].val);
+		} else if (commands[i].cmd == CMD_RAUC_UBOOT_SIZE) {
+			/* Global RAUC directive: U-Boot env size (supports hex with 0x prefix) */
+			rauc_uboot_size = (size_t)parse_u64(commands[i].val);
 		} else if (commands[i].cmd == CMD_LABEL) {
 			label_idx++;
 			labels[label_idx].name = commands[i].val;
@@ -304,13 +358,48 @@ static int parse_conf(char *data, size_t size, struct label *label)
 
 	default_label = &labels[0];
 
+	/* Initialize RAUC A/B boot if configured in extlinux.conf */
+	if (rauc_uboot_part && rauc_uboot_offset > 0) {
+		dprintf(INFO, "extlinux: Initializing RAUC A/B from partition '%s' offset 0x%llx size 0x%zx\n",
+			rauc_uboot_part, rauc_uboot_offset, rauc_uboot_size);
+		lk2nd_boot_ab_init(rauc_uboot_part, rauc_uboot_offset, rauc_uboot_size);
+	}
+
+	/*
+	 * A/B slot selection (optional, RAUC-compatible)
+	 * Try labels suffixed with _A or _B if A/B boot is configured
+	 * Falls back to standard label matching if A/B is not enabled
+	 */
+	char slot = lk2nd_boot_ab_get_slot();
+
+	/* Only try slot-specific labels if slot is valid (not default 'A' fallback) */
+	if (slot == 'A' || slot == 'B') {
+		char slot_name[128];
+		snprintf(slot_name, sizeof(slot_name), "%s_%c", default_name, slot);
+
+		/* First try: default label with slot suffix (e.g., "linux_A") */
+		for (i = 0; i < labels_count; ++i) {
+			if (!strcmp(slot_name, labels[i].name)) {
+				default_label = &labels[i];
+				dprintf(INFO, "extlinux: Using A/B label '%s' for slot %c\n",
+					slot_name, slot);
+				goto found_label;
+			}
+		}
+
+		dprintf(SPEW, "extlinux: No A/B-specific label found, trying default\n");
+	}
+
+	/* Standard label matching: exact match for default label */
 	for (i = 0; i < labels_count; ++i) {
 		if (!strcmp(default_name, labels[i].name)) {
 			default_label = &labels[i];
+			dprintf(INFO, "extlinux: Using label '%s'\n", default_name);
 			break;
 		}
 	}
 
+found_label:
 	memcpy(label, default_label, sizeof(*label));
 
 	free(labels);
@@ -626,6 +715,9 @@ static void lk2nd_boot_label(struct label *label)
 		ramdisk_size = ret;
 		arch_clean_invalidate_cache_range((addr_t)addrs.ramdisk, ramdisk_size);
 	}
+
+	/* A/B partition pre-boot: increment boot counter and check for fallback */
+	lk2nd_boot_ab_pre_boot();
 
 	boot_linux(addrs.kernel,
 		   addrs.tags,
