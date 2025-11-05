@@ -10,3 +10,5 @@ OBJS += \
 	$(LOCAL_DIR)/boot.o \
 	$(LOCAL_DIR)/extlinux.o \
 	$(LOCAL_DIR)/util.o \
+	$(LOCAL_DIR)/ab.o \
+	$(LOCAL_DIR)/ubootenv.o \
