@@ -1,11 +1,17 @@
 # SPDX-License-Identifier: BSD-3-Clause
 LK2ND_PROJECT := lk2nd
 LK2ND_DISPLAY ?= cont-splash
+LK2ND_SKIP_GDSC_CHECK ?= 0
 include lk2nd/project/base.mk
 
 MODULES += \
 	lk2nd/device \
 	lk2nd/device/2nd \
+
+# Conditional GDSC check bypass for headless operation
+ifeq ($(LK2ND_SKIP_GDSC_CHECK),1)
+DEFINES += LK2ND_SKIP_GDSC_CHECK=1
+endif
 
 ifneq ($(ENABLE_FBCON_DISPLAY_MSG),1)
 MODULES += $(if $(filter $(MODULES), lk2nd/display), lk2nd/device/menu)

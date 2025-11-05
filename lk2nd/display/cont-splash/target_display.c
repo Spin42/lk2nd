@@ -45,10 +45,16 @@ static bool mdp_setup_cont_splash(void)
 	 * are not enabled. Check if the MDP power domain (GDSC) is enabled
 	 * to try to avoid crashing if the clocks are disabled.
 	 */
+#ifndef LK2ND_SKIP_GDSC_CHECK
 	if (!(readl(MDP_GDSCR) & GDSC_POWER_ON_BIT)) {
 		dprintf(CRITICAL, "No continuous splash: MDP GDSC is not enabled\n");
 		return false;
 	}
+#else
+	/* Skip GDSC check for headless operation - exit early to avoid MDP register access */
+	dprintf(INFO, "Skipping GDSC check for headless boot\n");
+	return false;
+#endif
 #endif
 
 	if (!mdp_read_config(&fb)) {

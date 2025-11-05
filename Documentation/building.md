@@ -37,6 +37,16 @@ $ make TOOLCHAIN_PREFIX=arm-none-eabi- lk2nd-msmXXXX
 Replace `TOOLCHAIN_PREFIX` with the path to your tool chain.
 `lk2nd.img` is built and placed into `build-lk2nd-msmXXXX/lk2nd.img`.
 
+## Building lk2nd in headless mode
+
+In case you have a device that doesn't have a screen but still want to boot linux on it. You can define `LK2ND_SKIP_GDSC_CHECK` to `1` when invoking `make`.
+
+```
+$ make TOOLCHAIN_PREFIX=arm-none-eabi- LK2ND_SKIP_GDSC_CHECK=1 lk2nd-msmXXXX
+```
+
+This will print `Skipping GDSC check for headless boot` during the boot sequence and continue booting normally.
+
 ## Building lk1st
 
 **Note:** Unlike lk2nd, lk1st is still experimental and therefore not described
@@ -81,7 +91,7 @@ You need to switch the cable before starting linux to see all the logs.
 
 #### `LK2ND_COMPATIBLE=` - Board compatible
 
-Set the board compatible value. 
+Set the board compatible value.
 
 #### `LK2ND_BUNDLE_DTB=` - Board dtb file
 
