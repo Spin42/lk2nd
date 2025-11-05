@@ -13,4 +13,16 @@ void lk2nd_print_file_tree(char *root, char *prefix);
 /* extlinux.c */
 void lk2nd_try_extlinux(const char *mountpoint);
 
+/* ab.c - RAUC-compatible A/B partition support */
+#include "ubootenv.h"
+
+/* Initialize A/B boot system with U-Boot environment location */
+void lk2nd_boot_ab_init(const char *partition, uint64_t offset, size_t size);
+
+/* Get current active boot slot (A or B) based on BOOT_ORDER and counters */
+char lk2nd_boot_ab_get_slot(void);
+
+/* Pre-boot handler: decrement boot counter before boot attempt */
+void lk2nd_boot_ab_pre_boot(void);
+
 #endif /* LK2ND_BOOT_BOOT_H */
