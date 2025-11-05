@@ -25,4 +25,10 @@ char lk2nd_boot_ab_get_slot(void);
 /* Pre-boot handler: decrement boot counter before boot attempt */
 void lk2nd_boot_ab_pre_boot(void);
 
+/* Set boot partition names for A/B slots */
+void lk2nd_boot_ab_set_partitions(const char *part_a, const char *part_b);
+
+/* Get the boot partition name for the current slot */
+const char *lk2nd_boot_ab_get_partition(void);
+
 #endif /* LK2ND_BOOT_BOOT_H */

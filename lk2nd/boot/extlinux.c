@@ -41,6 +41,8 @@ enum token {
 	CMD_RAUC_UBOOT_PART,    /* RAUC U-Boot env partition name */
 	CMD_RAUC_UBOOT_OFFSET,  /* RAUC U-Boot env offset in bytes */
 	CMD_RAUC_UBOOT_SIZE,    /* RAUC U-Boot env size in bytes */
+	CMD_RAUC_BOOT_PART_A,   /* Boot partition name for slot A */
+	CMD_RAUC_BOOT_PART_B,   /* Boot partition name for slot B */
 	CMD_UNKNOWN,
 };
 
@@ -63,6 +65,8 @@ static const struct {
 	{"rauc_uboot_part",	CMD_RAUC_UBOOT_PART},
 	{"rauc_uboot_offset",	CMD_RAUC_UBOOT_OFFSET},
 	{"rauc_uboot_size",	CMD_RAUC_UBOOT_SIZE},
+	{"rauc_boot_part_a",	CMD_RAUC_BOOT_PART_A},
+	{"rauc_boot_part_b",	CMD_RAUC_BOOT_PART_B},
 };
 
 static enum token cmd_to_tok(char *command)
@@ -269,6 +273,8 @@ static int parse_conf(char *data, size_t size, struct label *label)
 	const char *rauc_uboot_part = NULL;
 	uint64_t rauc_uboot_offset = 0;
 	size_t rauc_uboot_size = 0;
+	const char *rauc_boot_part_a = NULL;
+	const char *rauc_boot_part_b = NULL;
 
 	commands_count = count_lines(data, size);
 	commands = calloc(commands_count, sizeof(*commands));
@@ -315,6 +321,12 @@ static int parse_conf(char *data, size_t size, struct label *label)
 		} else if (commands[i].cmd == CMD_RAUC_UBOOT_SIZE) {
 			/* Global RAUC directive: U-Boot env size (supports hex with 0x prefix) */
 			rauc_uboot_size = (size_t)parse_u64(commands[i].val);
+		} else if (commands[i].cmd == CMD_RAUC_BOOT_PART_A) {
+			/* Global RAUC directive: Boot partition for slot A */
+			rauc_boot_part_a = commands[i].val;
+		} else if (commands[i].cmd == CMD_RAUC_BOOT_PART_B) {
+			/* Global RAUC directive: Boot partition for slot B */
+			rauc_boot_part_b = commands[i].val;
 		} else if (commands[i].cmd == CMD_LABEL) {
 			label_idx++;
 			labels[label_idx].name = commands[i].val;
@@ -363,6 +375,11 @@ static int parse_conf(char *data, size_t size, struct label *label)
 		dprintf(INFO, "extlinux: Initializing RAUC A/B from partition '%s' offset 0x%llx size 0x%zx\n",
 			rauc_uboot_part, rauc_uboot_offset, rauc_uboot_size);
 		lk2nd_boot_ab_init(rauc_uboot_part, rauc_uboot_offset, rauc_uboot_size);
+
+		/* Configure boot partition names if specified */
+		if (rauc_boot_part_a || rauc_boot_part_b) {
+			lk2nd_boot_ab_set_partitions(rauc_boot_part_a, rauc_boot_part_b);
+		}
 	}
 
 	/*
