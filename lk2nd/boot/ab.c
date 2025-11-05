@@ -16,11 +16,23 @@
  * stored at a fixed offset within the userdata partition.
  *
  * Configuration via extlinux.conf (recommended):
+ *   # U-Boot environment location
  *   rauc_uboot_part userdata
  *   rauc_uboot_offset 0x10000
  *   rauc_uboot_size 0x20000
  *
+ *   # Boot partition names for A/B slots
+ *   rauc_boot_part_a boot-a
+ *   rauc_boot_part_b boot-b
+ *
+ *   # Boot configuration (same extlinux.conf in both boot-a and boot-b partitions)
  *   default linux
+ *   label linux
+ *       kernel /vmlinuz
+ *       initrd /initramfs
+ *       append root=/dev/mapper/image-rootfs_a
+ *
+ * OR using slot-specific labels (if both slots share same partition):
  *   label linux_A
  *       kernel /vmlinuz-A
  *       initrd /initramfs-A
@@ -32,9 +44,10 @@
  *
  * Boot Flow:
  * 1. Initialize: Read U-Boot env from partition at configured offset
- * 2. Pre-boot: Determine active slot from BOOT_ORDER, decrement counter
- * 3. Boot: System boots selected slot (kernel/initramfs with slot suffix)
- * 4. Userspace marks boot successful by writing directly to U-Boot env
+ * 2. Select partition: lk2nd scans only the partition for the active slot (boot-a or boot-b)
+ * 3. Pre-boot: Determine active slot from BOOT_ORDER, decrement counter
+ * 4. Boot: System boots selected slot using extlinux.conf from that partition
+ * 5. Userspace marks boot successful by writing directly to U-Boot env
  *
  * Environment Variables (RAUC-standard):
  * - BOOT_ORDER: Space-separated slot list to try (e.g., "A B")
@@ -55,6 +68,8 @@ static struct {
 	size_t size;
 	bool initialized;
 	char current_slot;  /* Cached current boot slot */
+	char boot_part_a[64];  /* Boot partition name for slot A */
+	char boot_part_b[64];  /* Boot partition name for slot B */
 } ab_state = {0};
 
 /*
@@ -150,4 +165,36 @@ void lk2nd_boot_ab_pre_boot(void)
 
 	/* Save state before booting (critical for boot counting) */
 	uboot_env_save(&ab_state.env, ab_state.partition, ab_state.offset);
+}
+
+/*
+ * Set boot partition names for A/B slots
+ * This tells lk2nd which partition to scan for each slot
+ */
+void lk2nd_boot_ab_set_partitions(const char *part_a, const char *part_b)
+{
+	if (part_a)
+		strlcpy(ab_state.boot_part_a, part_a, sizeof(ab_state.boot_part_a));
+	if (part_b)
+		strlcpy(ab_state.boot_part_b, part_b, sizeof(ab_state.boot_part_b));
+
+	dprintf(INFO, "A/B boot partitions: A='%s', B='%s'\n",
+		ab_state.boot_part_a, ab_state.boot_part_b);
+}
+
+/*
+ * Get the boot partition name for the current slot
+ * Returns NULL if not configured or A/B not initialized
+ */
+const char *lk2nd_boot_ab_get_partition(void)
+{
+	if (!ab_state.initialized)
+		return NULL;
+
+	if (ab_state.current_slot == 'A' && ab_state.boot_part_a[0])
+		return ab_state.boot_part_a;
+	else if (ab_state.current_slot == 'B' && ab_state.boot_part_b[0])
+		return ab_state.boot_part_b;
+
+	return NULL;
 }

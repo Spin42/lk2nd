@@ -26,14 +26,39 @@ static void lk2nd_scan_devices(void)
 	char mountpoint[16];
 	bdev_t *bdev;
 	int ret;
+	const char *target_partition = NULL;
 
 	dprintf(INFO, "boot: Trying to boot from the file system...\n");
+
+	/* Check if A/B boot is configured with specific partition names */
+	target_partition = lk2nd_boot_ab_get_partition();
+	if (target_partition) {
+		dprintf(INFO, "boot: A/B mode - targeting partition '%s'\n", target_partition);
+	}
 
 	list_for_every_entry(&bdevs->list, bdev, bdev_t, node) {
 
 		/* Skip top level block devices. */
 		if (!bdev->is_leaf)
 			continue;
+
+		/* If A/B is configured, only scan the specific partition for current slot */
+		if (target_partition) {
+			/* Check both name and label */
+			bool matches = false;
+			if (bdev->name && !strcmp(bdev->name, target_partition))
+				matches = true;
+			else if (bdev->label && !strcmp(bdev->label, target_partition))
+				matches = true;
+
+			if (!matches) {
+				dprintf(SPEW, "boot: Skipping %s (A/B slot mismatch)\n",
+					bdev->name ? bdev->name : bdev->label);
+				continue;
+			}
+
+			dprintf(INFO, "boot: Found A/B target partition: %s\n", bdev->name);
+		}
 
 		/*
 		 * Skip partitions that are too small to have a boot fs on.
@@ -58,6 +83,10 @@ static void lk2nd_scan_devices(void)
 		}
 
 		lk2nd_try_extlinux(mountpoint);
+
+		/* If A/B target found and tried, stop scanning */
+		if (target_partition)
+			break;
 	}
 
 	dprintf(INFO, "boot: Bootable file system not found. Reverting to android boot.\n");
