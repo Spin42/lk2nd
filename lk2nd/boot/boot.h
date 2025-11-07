@@ -25,10 +25,13 @@ char lk2nd_boot_ab_get_slot(void);
 /* Pre-boot handler: decrement boot counter before boot attempt */
 void lk2nd_boot_ab_pre_boot(void);
 
-/* Set boot partition names for A/B slots */
-void lk2nd_boot_ab_set_partitions(const char *part_a, const char *part_b);
+/* Get the base device name to read boot data from (same as U-Boot env partition) */
+const char *lk2nd_boot_ab_get_base_device(void);
 
-/* Get the boot partition name for the current slot */
-const char *lk2nd_boot_ab_get_partition(void);
+/* Set boot partition offsets for A/B slots (for sub-partitions within a main partition) */
+void lk2nd_boot_ab_set_offsets(uint64_t offset_a, uint64_t offset_b);
+
+/* Get the boot partition offset for the current slot */
+uint64_t lk2nd_boot_ab_get_offset(void);
 
 #endif /* LK2ND_BOOT_BOOT_H */
