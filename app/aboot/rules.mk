@@ -11,6 +11,12 @@ OBJS += \
 	$(LOCAL_DIR)/fastboot.o \
 	$(LOCAL_DIR)/recovery.o
 
+ifeq ($(UMS_ENABLE), 1)
+DEFINES += UMS_ENABLE=1
+OBJS += \
+	$(LOCAL_DIR)/ums.o
+endif
+
 ifeq ($(ABOOT_STANDALONE), 1)
 DEFINES += ABOOT_STANDALONE=1
 OBJS := $(filter-out $(LOCAL_DIR)/recovery.o, $(OBJS))

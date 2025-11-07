@@ -2,6 +2,8 @@
 LK2ND_PROJECT := lk2nd
 LK2ND_DISPLAY ?= cont-splash
 LK2ND_SKIP_GDSC_CHECK ?= 0
+UMS_ENABLE ?= 0
+UMS_COUNTDOWN_SECONDS ?= 3
 include lk2nd/project/base.mk
 
 MODULES += \
@@ -11,6 +13,12 @@ MODULES += \
 # Conditional GDSC check bypass for headless operation
 ifeq ($(LK2ND_SKIP_GDSC_CHECK),1)
 DEFINES += LK2ND_SKIP_GDSC_CHECK=1
+endif
+
+# USB Mass Storage support
+ifeq ($(UMS_ENABLE),1)
+DEFINES += UMS_ENABLE=1
+DEFINES += UMS_COUNTDOWN_SECONDS=$(UMS_COUNTDOWN_SECONDS)
 endif
 
 ifneq ($(ENABLE_FBCON_DISPLAY_MSG),1)
