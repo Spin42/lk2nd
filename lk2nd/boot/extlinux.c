@@ -17,6 +17,7 @@
 #include <lk2nd/boot.h>
 #include <lk2nd/device.h>
 
+#include "ab.h"
 #include "boot.h"
 
 struct label {

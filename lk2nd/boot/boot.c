@@ -11,6 +11,7 @@
 #include <lk2nd/boot.h>
 #include <lk2nd/hw/bdev.h>
 
+#include "ab.h"
 #include "boot.h"
 
 #ifndef LK2ND_BOOT_MIN_SIZE
