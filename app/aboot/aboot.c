@@ -95,6 +95,7 @@
 #include <menu_keys_detect.h>
 #include <display_menu.h>
 #include "fastboot_test.h"
+#include "ums.h"
 
 #if WITH_LK2ND
 #include <lk2nd/init.h>
@@ -111,6 +112,7 @@ extern void platform_uninit(void);
 extern void target_uninit(void);
 extern int get_target_boot_params(const char *cmdline, const char *part,
 				  char **buf);
+extern int dgetc(char *c, bool wait);
 
 void *info_buf;
 void write_device_info_mmc(device_info *dev);
@@ -4020,7 +4022,7 @@ void cmd_flash_meta_img(const char *arg, void *data, unsigned sz)
 		}
 
 		if (VB_M <= target_get_vb_version() &&
-			!device.is_unlock_critical) 
+			!device.is_unlock_critical)
 		{
 			fastboot_fail("Device is critical locked, Meta image flashing is not allowed");
 			return;
@@ -5580,6 +5582,19 @@ void aboot_init(const struct app_descriptor *app)
 	 */
 	if (is_user_force_reset())
 		goto normal_boot;
+
+#ifdef UMS_ENABLE
+	/* Check for UMS mode entry */
+	if (ums_countdown_check()) {
+		dprintf(INFO, "Entering USB Mass Storage mode...\n");
+		if (ums_enter_mode("userdata") == 0) {
+			dprintf(INFO, "UMS mode ended, rebooting...\n");
+			reboot_device(0);
+		} else {
+			dprintf(CRITICAL, "UMS mode failed, continuing normal boot\n");
+		}
+	}
+#endif
 
 	/* Check if we should do something other than booting up */
 	if (keys_get_state(KEY_VOLUMEUP) && keys_get_state(KEY_VOLUMEDOWN))
