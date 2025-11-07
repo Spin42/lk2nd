@@ -69,12 +69,6 @@ static const struct {
 	{"ab_env_size", 	CMD_AB_ENV_SIZE},
 	{"ab_slot_offset_a", 	CMD_AB_SLOT_OFFSET_A},
 	{"ab_slot_offset_b", 	CMD_AB_SLOT_OFFSET_B},
-	/* Backward compatibility (RAUC names) */
-	{"rauc_uboot_part", 	CMD_AB_ENV_PART},
-	{"rauc_uboot_offset", 	CMD_AB_ENV_OFFSET},
-	{"rauc_uboot_size", 	CMD_AB_ENV_SIZE},
-	{"rauc_boot_offset_a", 	CMD_AB_SLOT_OFFSET_A},
-	{"rauc_boot_offset_b", 	CMD_AB_SLOT_OFFSET_B},
 };
 
 static enum token cmd_to_tok(char *command)
@@ -381,9 +375,9 @@ static int parse_conf(char *data, size_t size, struct label *label)
 	}
 
 	/*
-	 * A/B slot selection (optional, RAUC-compatible)
-	 * Try labels suffixed with _A or _B if A/B boot is configured
-	 * Falls back to standard label matching if A/B is not enabled
+	 * A/B slot selection
+	 * Try labels suffixed with _A or _B if A/B boot is configured.
+	 * Falls back to standard label matching if A/B is not enabled.
 	 */
 	char slot = lk2nd_boot_ab_get_slot();
 
@@ -728,7 +722,7 @@ static void lk2nd_boot_label(struct label *label)
 			return;
 		}
 		ramdisk_size = ret;
-		arch_clean_invalidate_cache_range((addr_t)addrs.ramdisk, ramdisk_size);
+	arch_clean_invalidate_cache_range((addr_t)addrs.ramdisk, ramdisk_size);
 	}
 
 	/* A/B partition pre-boot: increment boot counter and check for fallback */
