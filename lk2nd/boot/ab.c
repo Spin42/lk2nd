@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-/* A/B partition boot integration for lk2nd (RAUC-compatible) */
+/* A/B partition boot integration for lk2nd (offset-only) */
 
 #include <debug.h>
 #include <stdlib.h>
@@ -11,30 +11,27 @@
 #include "ubootenv.h"
 
 /*
- * RAUC-compatible A/B Boot Implementation for lk2nd (offset-only)
+ * Generic A/B Boot Implementation (offset-only)
  *
- * This implements the RAUC bootloader interface using U-Boot environment variables.
- * The bootloader reads these variables from a U-Boot environment block typically
- * stored at a fixed offset within a base partition (e.g., userdata).
+ * Uses U-Boot environment variables stored at a fixed offset within a base
+ * partition (e.g. userdata). Offsets for slots A/B are byte offsets within
+ * the same base partition.
  *
- * Configuration via extlinux.conf (recommended):
- *   # U-Boot environment location (base device and env window)
- *   rauc_uboot_part mmcblk0p20
- *   rauc_uboot_offset 0x10000
- *   rauc_uboot_size 0x20000
+ * Optional configuration via extlinux.conf (global directives):
+ *   ab_env_part <partition>
+ *   ab_env_offset <bytes>
+ *   ab_env_size <bytes>
+ *   ab_slot_offset_a <bytes>
+ *   ab_slot_offset_b <bytes>
  *
- *   # Boot slot offsets within the same base device (sub-partitions)
- *   rauc_boot_offset_a 0x00100000   # 1 MiB
- *   rauc_boot_offset_b 0x04100000   # 1 MiB + 64 MiB
- *
- * Boot Flow:
+ * Flow:
  * 1. Initialize: Read U-Boot env from the base device at configured offset
  * 2. Select slot: Determine current slot from BOOT_ORDER and remaining attempts
  * 3. Pre-boot: Decrement boot counter (BOOT_<slot>_LEFT) and save the env
  * 4. Boot: Publish a subdevice at the selected slot offset, mount it, and load extlinux
- * 5. Userspace: On success, reset counters in the U-Boot env (e.g., using fw_setenv)
+ * 5. Userspace: On success, reset counters in the U-Boot env (e.g. fw_setenv)
  *
- * Environment Variables (RAUC-standard):
+ * Environment Variables:
  * - BOOT_ORDER: Space-separated slot list to try (e.g., "A B")
  * - BOOT_A_LEFT: Remaining boot attempts for slot A
  * - BOOT_B_LEFT: Remaining boot attempts for slot B
