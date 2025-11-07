@@ -7,6 +7,7 @@
 #include <lib/bio.h>
 #include <list.h>
 
+#include "ab.h"
 #include "boot.h"
 #include "ubootenv.h"
 
@@ -14,7 +15,7 @@
  * Generic A/B Boot Implementation (offset-only)
  *
  * Uses U-Boot environment variables stored at a fixed offset within a base
- * partition (e.g. userdata). Offsets for slots A/B are byte offsets within
+ * partition (e.g. mmcblk0p20). Offsets for slots A/B are byte offsets within
  * the same base partition.
  *
  * Optional configuration via extlinux.conf (global directives):
@@ -50,8 +51,8 @@ static struct {
 } ab_state = {0};
 
 /*
- * Resolve a base device spec (from extlinux) to an actual bdev name:
- * - Try the name as-is
+ * Resolve a base device spec:
+ * - Try the spec as-is
  * - If it's a Linux-style name like "mmcblk0pN", map to our wrapper device
  *   name "wrp0pN"
  * - Otherwise, try to find a device by GPT label match
