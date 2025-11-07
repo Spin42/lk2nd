@@ -2,8 +2,11 @@
 LK2ND_PROJECT := lk2nd
 LK2ND_DISPLAY ?= cont-splash
 LK2ND_SKIP_GDSC_CHECK ?= 0
+# When set to 1, render the fastboot/lk2nd menu on the serial console instead of the framebuffer
+LK2ND_SERIAL_MENU ?= 0
 UMS_ENABLE ?= 0
 UMS_COUNTDOWN_SECONDS ?= 3
+UMS_PARTITION ?= userdata
 include lk2nd/project/base.mk
 
 MODULES += \
@@ -19,6 +22,12 @@ endif
 ifeq ($(UMS_ENABLE),1)
 DEFINES += UMS_ENABLE=1
 DEFINES += UMS_COUNTDOWN_SECONDS=$(UMS_COUNTDOWN_SECONDS)
+DEFINES += UMS_PARTITION="$(UMS_PARTITION)"
+endif
+
+# Serial menu support
+ifeq ($(LK2ND_SERIAL_MENU),1)
+DEFINES += LK2ND_SERIAL_MENU=1
 endif
 
 ifneq ($(ENABLE_FBCON_DISPLAY_MSG),1)

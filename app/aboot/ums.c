@@ -635,26 +635,25 @@ int ums_countdown_check(void)
     char c;
 
     dprintf(ALWAYS, "\n");
-    dprintf(ALWAYS, "=== lk2nd USB Mass Storage Mode ===\n");
-    dprintf(ALWAYS, "Press any key within %d seconds to enter UMS mode...\n", countdown);
+    dprintf(ALWAYS, "=== lk2nd Boot Menu Countdown ===\n");
+    dprintf(ALWAYS, "Press any key within %d seconds to open the fastboot menu (serial).\n", countdown);
+    dprintf(ALWAYS, "From the menu you can select 'USB Storage' to enter Mass Storage mode.\n\n");
 
     while (countdown > 0) {
-        dprintf(ALWAYS, "UMS mode in %d seconds... ", countdown);
+        dprintf(ALWAYS, "Opening menu in %d seconds... ", countdown);
 
-        /* Check for 1 second or key press */
         uint64_t second_start = current_time_hires();
-        while ((current_time_hires() - second_start) < 1000000) {  /* 1 second in microseconds */
+        while ((current_time_hires() - second_start) < 1000000) {
             if (dgetc(&c, false) == 0) {
-                dprintf(ALWAYS, "\nKey pressed! Entering UMS mode...\n");
-                return 1;
+                dprintf(ALWAYS, "\nKey pressed! Showing menu...\n");
+                return 1; /* signal to enter fastboot/menu instead of normal boot */
             }
-            thread_sleep(10);  /* Small delay to prevent busy waiting */
+            thread_sleep(10);
         }
-
         dprintf(ALWAYS, "\r");
         countdown--;
     }
 
-    dprintf(ALWAYS, "\nTimeout reached, continuing normal boot...\n\n");
+    dprintf(ALWAYS, "\nNo key pressed, continuing normal boot...\n\n");
     return 0;
 }

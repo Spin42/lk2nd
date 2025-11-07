@@ -37,6 +37,9 @@ enum fbcon_colors {
 
 static int scale_factor = 0;
 
+/* Forward declaration for serial console menu (local to this file) */
+static void display_serial_menu(void);
+
 static void fbcon_puts(const char *str, unsigned type, int y, bool center)
 {
 	struct fbcon_config *fb = fbcon_display();
@@ -134,6 +137,21 @@ static void opt_bootloader(void) { reboot_device(FASTBOOT_MODE); }
 static void opt_edl(void)        { reboot_device(EMERGENCY_DLOAD); }
 static void opt_shutdown(void)   { shutdown_device(); }
 
+#ifdef UMS_ENABLE
+extern int ums_enter_mode(const char *partition_name);
+static void opt_ums(void)
+{
+	dprintf(ALWAYS, "Entering USB Mass Storage mode...\n");
+	if (ums_enter_mode(UMS_PARTITION) == 0) {
+		dprintf(ALWAYS, "UMS mode ended, rebooting...\n");
+		reboot_device(0);
+	} else {
+		dprintf(CRITICAL, "UMS mode failed\n");
+		thread_sleep(2000);
+	}
+}
+#endif
+
 static struct {
 	char *name;
 	unsigned color;
@@ -143,6 +161,9 @@ static struct {
 	{ " Continue ", WHITE,  opt_continue },
 	{ " Recovery ", ORANGE, opt_recovery },
 	{ "Bootloader", ORANGE, opt_bootloader },
+#ifdef UMS_ENABLE
+	{ "USB Storage", YELLOW, opt_ums },
+#endif
 	{ "    EDL   ", RED,    opt_edl },
 	{ " Shutdown ", RED,    opt_shutdown },
 };
@@ -166,8 +187,15 @@ void display_fastboot_menu(void)
 	unsigned int sel = 0, i;
 	bool armv8 = is_scm_armv8_support();
 
-	if (!fb)
+	/* Prefer serial console menu if explicitly enabled or if no framebuffer */
+#ifdef LK2ND_SERIAL_MENU
+	display_serial_menu();
+	return;
+#endif
+	if (!fb) {
+		display_serial_menu();
 		return;
+	}
 
 	/*
 	 * Make sure the specified line lenght fits on the screen.
@@ -189,15 +217,8 @@ void display_fastboot_menu(void)
 	fbcon_puts_ln(WHITE, y, incr, true, xstr(BOARD));
 
 	scale_factor = old_scale;
-	incr = FONT_HEIGHT * scale_factor;
-
-	fbcon_puts_ln(SILVER, y, incr, true, LK2ND_VERSION);
-	if (lk2nd_dev.model)
-		fbcon_puts_ln(SILVER, y, incr, true, lk2nd_dev.model);
-	else
 		fbcon_puts_ln(RED, y, incr, true, "Unknown (FIXME!)");
 	y += incr;
-
 	fbcon_puts_ln(RED, y, incr, true, "Fastboot mode");
 	y += incr;
 
@@ -302,4 +323,95 @@ void display_default_image_on_screen(void)
 	fbcon_puts_ln(WHITE, y, incr, true, xstr(BOARD));
 	fbcon_puts_ln(SILVER, y, incr, true, LK2ND_VERSION);
 	fbcon_flush();
+}
+
+extern int dgetc(char *c, bool wait);
+
+/**
+ * display_serial_menu() - Display menu on serial console for headless operation
+ */
+static void display_serial_menu(void)
+{
+	unsigned int sel = 0, i;
+	char input;
+	bool armv8 = is_scm_armv8_support();
+
+	dprintf(ALWAYS, "\n");
+	dprintf(ALWAYS, "===============================================\n");
+	dprintf(ALWAYS, "           lk2nd Boot Menu (%s)\n", xstr(BOARD));
+	dprintf(ALWAYS, "===============================================\n");
+	dprintf(ALWAYS, "Version: %s\n", LK2ND_VERSION);
+	if (lk2nd_dev.model)
+		dprintf(ALWAYS, "Device:  %s\n", lk2nd_dev.model);
+	else
+		dprintf(ALWAYS, "Device:  Unknown (FIXME!)\n");
+
+	dprintf(ALWAYS, "ARM64:   %s\n", armv8 ? "available" : "unavailable");
+	if (lk2nd_dev.panel.name)
+		dprintf(ALWAYS, "Panel:   %s\n", lk2nd_dev.panel.name);
+	if (lk2nd_dev.battery)
+		dprintf(ALWAYS, "Battery: %s\n", lk2nd_dev.battery);
+#if WITH_LK2ND_DEVICE_2ND
+	if (lk2nd_dev.bootloader)
+		dprintf(ALWAYS, "Bootloader: %s\n", lk2nd_dev.bootloader);
+#endif
+
+	dprintf(ALWAYS, "===============================================\n");
+	dprintf(ALWAYS, "Mode: Fastboot\n");
+	dprintf(ALWAYS, "===============================================\n");
+
+	while (true) {
+		dprintf(ALWAYS, "\nSelect an option:\n\n");
+
+		for (i = 0; i < ARRAY_SIZE(menu_options); ++i) {
+			dprintf(ALWAYS, "%s %d. %s\n",
+				i == sel ? ">" : " ",
+				i + 1,
+				menu_options[i].name
+			);
+		}
+
+		dprintf(ALWAYS, "\nUse 'u'/'d' to navigate, 'Enter' to select, 'q' to quit: ");
+
+		/* Wait for input */
+		while (dgetc(&input, false) != 0)
+			thread_sleep(10);
+
+		switch (input) {
+		case '\r':
+		case '\n':
+			dprintf(ALWAYS, "\nExecuting: %s\n", menu_options[sel].name);
+			menu_options[sel].action();
+			break;
+		case 'u':
+		case 'U':
+			if (sel == 0)
+				sel = ARRAY_SIZE(menu_options) - 1;
+			else
+				sel--;
+			break;
+		case 'd':
+		case 'D':
+			sel++;
+			if (sel >= ARRAY_SIZE(menu_options))
+				sel = 0;
+			break;
+		case 'q':
+		case 'Q':
+			dprintf(ALWAYS, "\nQuitting menu...\n");
+			return;
+		case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
+			sel = input - '1';
+			if (sel < ARRAY_SIZE(menu_options)) {
+				dprintf(ALWAYS, "\nExecuting: %s\n", menu_options[sel].name);
+				menu_options[sel].action();
+			} else {
+				dprintf(ALWAYS, "\nInvalid option!\n");
+			}
+			break;
+		default:
+			dprintf(ALWAYS, "\nInvalid input. Use u/d/Enter/q or number keys.\n");
+			break;
+		}
+	}
 }

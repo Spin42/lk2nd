@@ -85,13 +85,13 @@ You need to switch the cable before starting linux to see all the logs.
 
 #### `UMS_ENABLE=` - Enable USB Mass Storage mode
 
-By setting this option to 1, lk2nd will include UMS (USB Mass Storage) support and show a countdown during boot allowing entry into mass storage mode.
+By setting this option to 1, lk2nd will include UMS (USB Mass Storage) support. When enabled, lk2nd shows a short countdown during early boot; pressing any key now opens the fastboot menu on the serial console where you can select "USB Storage" to enter Mass Storage mode.
 
 ```
 $ make TOOLCHAIN_PREFIX=arm-none-eabi- UMS_ENABLE=1 lk2nd-msmXXXX
 ```
 
-When enabled, lk2nd will display a 3-second countdown during boot. Press any key during the countdown to enter UMS mode, which exposes the userdata partition as a USB mass storage device for direct access from a PC.
+When enabled, lk2nd will display a 3-second countdown during boot. Press any key during the countdown to open the serial fastboot menu. From there, choose "USB Storage" to expose the configured partition as a USB mass storage device for direct access from a PC.
 
 #### `UMS_COUNTDOWN_SECONDS=` - Set UMS countdown duration
 
@@ -99,6 +99,21 @@ Set the number of seconds to wait for keypress before continuing normal boot (de
 
 ```
 $ make TOOLCHAIN_PREFIX=arm-none-eabi- UMS_ENABLE=1 UMS_COUNTDOWN_SECONDS=5 lk2nd-msmXXXX
+#### `UMS_PARTITION=` - Partition to export in UMS
+
+Set the partition name to expose when entering USB Mass Storage mode via the menu (default: `userdata`).
+
+```
+$ make TOOLCHAIN_PREFIX=arm-none-eabi- UMS_ENABLE=1 UMS_PARTITION=userdata lk2nd-msmXXXX
+```
+
+#### `LK2ND_SERIAL_MENU=` - Force menu on serial console
+
+Set to 1 to always render the fastboot/lk2nd menu on the serial console (even if a framebuffer is present). Without this flag, the menu falls back to serial automatically if no display is available; with this flag it will prefer serial regardless.
+
+```
+$ make TOOLCHAIN_PREFIX=arm-none-eabi- LK2ND_SERIAL_MENU=1 lk2nd-msmXXXX
+```
 ```
 
 ### lk2nd specific
