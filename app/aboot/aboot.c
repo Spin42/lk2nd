@@ -5584,15 +5584,11 @@ void aboot_init(const struct app_descriptor *app)
 		goto normal_boot;
 
 #ifdef UMS_ENABLE
-	/* Check for UMS mode entry */
+	/* Repurposed: countdown now enters the fastboot/serial menu instead of launching UMS directly */
 	if (ums_countdown_check()) {
-		dprintf(INFO, "Entering USB Mass Storage mode...\n");
-		if (ums_enter_mode("userdata") == 0) {
-			dprintf(INFO, "UMS mode ended, rebooting...\n");
-			reboot_device(0);
-		} else {
-			dprintf(CRITICAL, "UMS mode failed, continuing normal boot\n");
-		}
+		boot_into_fastboot = true;
+		/* force menu even if other conditions would skip */
+		dprintf(INFO, "User requested boot menu via countdown.\n");
 	}
 #endif
 
