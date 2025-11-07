@@ -2,10 +2,14 @@
 /* Copyright (c) 2023 Nikita Travkin <nikita@trvn.ru> */
 
 #include <debug.h>
+#include <err.h>
+#include <stdint.h>
+#include <sys/types.h>
 #include <lib/bio.h>
 #include <lib/partition.h>
 #include <partition_parser.h>
 #include <stdlib.h>
+#include <mmc_wrapper.h>
 
 #include <lk2nd/init.h>
 
@@ -14,6 +18,16 @@
 static ssize_t lk2nd_wrapper_bdev_read_block(struct bdev *bdev, void *buf, bnum_t block, uint count)
 {
 	return mmc_read((uint64_t)block * bdev->block_size, buf, count * bdev->block_size);
+}
+
+static ssize_t lk2nd_wrapper_bdev_write_block(struct bdev *bdev, const void *buf, bnum_t block, uint count)
+{
+	uint64_t data_addr = (uint64_t)block * bdev->block_size;
+	uint32_t data_len = count * bdev->block_size;
+	uint32_t ret = mmc_write(data_addr, data_len, (void *)buf);
+	if (ret)
+		return ERR_IO;
+	return data_len;
 }
 
 static void lk2nd_wrapper_publish_subdevices(bdev_t *bdev)
@@ -47,6 +61,7 @@ void lk2nd_wrapper_bio_register(void)
 	bio_initialize_bdev(bdev, name, block_size, card_capacity / block_size);
 
 	bdev->read_block = lk2nd_wrapper_bdev_read_block;
+	bdev->write_block = lk2nd_wrapper_bdev_write_block;
 
 	bio_register_device(bdev);
 

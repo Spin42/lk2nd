@@ -38,11 +38,12 @@ enum token {
 	CMD_FDT,
 	CMD_FDTDIR,
 	CMD_FDTOVERLAY,
-	CMD_RAUC_UBOOT_PART,    /* RAUC U-Boot env partition name */
-	CMD_RAUC_UBOOT_OFFSET,  /* RAUC U-Boot env offset in bytes */
-	CMD_RAUC_UBOOT_SIZE,    /* RAUC U-Boot env size in bytes */
-	CMD_RAUC_BOOT_PART_A,   /* Boot partition name for slot A */
-	CMD_RAUC_BOOT_PART_B,   /* Boot partition name for slot B */
+	/* Generic A/B directives */
+	CMD_AB_ENV_PART,
+	CMD_AB_ENV_OFFSET,
+	CMD_AB_ENV_SIZE,
+	CMD_AB_SLOT_OFFSET_A,
+	CMD_AB_SLOT_OFFSET_B,
 	CMD_UNKNOWN,
 };
 
@@ -50,23 +51,30 @@ static const struct {
 	char *command;
 	enum token token;
 } token_map[] = {
-	{"label",		CMD_LABEL},
-	{"default",		CMD_DEFAULT},
-	{"kernel",		CMD_KERNEL},
-	{"linux",		CMD_KERNEL},
-	{"fdtdir",		CMD_FDTDIR},
-	{"devicetreedir",	CMD_FDTDIR},
-	{"fdt",			CMD_FDT},
-	{"devicetree",		CMD_FDT},
-	{"fdtoverlays",		CMD_FDTOVERLAY},
-	{"devicetree-overlay",	CMD_FDTOVERLAY},
-	{"initrd",		CMD_INITRD},
-	{"append",		CMD_APPEND},
-	{"rauc_uboot_part",	CMD_RAUC_UBOOT_PART},
-	{"rauc_uboot_offset",	CMD_RAUC_UBOOT_OFFSET},
-	{"rauc_uboot_size",	CMD_RAUC_UBOOT_SIZE},
-	{"rauc_boot_part_a",	CMD_RAUC_BOOT_PART_A},
-	{"rauc_boot_part_b",	CMD_RAUC_BOOT_PART_B},
+	{"label", 		CMD_LABEL},
+	{"default", 		CMD_DEFAULT},
+	{"kernel", 		CMD_KERNEL},
+	{"linux", 		CMD_KERNEL},
+	{"fdtdir", 		CMD_FDTDIR},
+	{"devicetreedir", 	CMD_FDTDIR},
+	{"fdt", 			CMD_FDT},
+	{"devicetree", 		CMD_FDT},
+	{"fdtoverlays", 	CMD_FDTOVERLAY},
+	{"devicetree-overlay", 	CMD_FDTOVERLAY},
+	{"initrd", 		CMD_INITRD},
+	{"append", 		CMD_APPEND},
+	/* Generic A/B */
+	{"ab_env_part", 	CMD_AB_ENV_PART},
+	{"ab_env_offset", 	CMD_AB_ENV_OFFSET},
+	{"ab_env_size", 	CMD_AB_ENV_SIZE},
+	{"ab_slot_offset_a", 	CMD_AB_SLOT_OFFSET_A},
+	{"ab_slot_offset_b", 	CMD_AB_SLOT_OFFSET_B},
+	/* Backward compatibility (RAUC names) */
+	{"rauc_uboot_part", 	CMD_AB_ENV_PART},
+	{"rauc_uboot_offset", 	CMD_AB_ENV_OFFSET},
+	{"rauc_uboot_size", 	CMD_AB_ENV_SIZE},
+	{"rauc_boot_offset_a", 	CMD_AB_SLOT_OFFSET_A},
+	{"rauc_boot_offset_b", 	CMD_AB_SLOT_OFFSET_B},
 };
 
 static enum token cmd_to_tok(char *command)
@@ -269,12 +277,12 @@ static int parse_conf(char *data, size_t size, struct label *label)
 	int label_idx;
 	int i;
 
-	/* RAUC U-Boot environment configuration (global directives) */
-	const char *rauc_uboot_part = NULL;
-	uint64_t rauc_uboot_offset = 0;
-	size_t rauc_uboot_size = 0;
-	const char *rauc_boot_part_a = NULL;
-	const char *rauc_boot_part_b = NULL;
+	/* Generic A/B environment configuration (global directives) */
+	const char *ab_env_part = NULL;
+	uint64_t ab_env_offset = 0;
+	size_t ab_env_size = 0;
+	uint64_t ab_slot_offset_a = 0;
+	uint64_t ab_slot_offset_b = 0;
 
 	commands_count = count_lines(data, size);
 	commands = calloc(commands_count, sizeof(*commands));
@@ -312,21 +320,16 @@ static int parse_conf(char *data, size_t size, struct label *label)
 	for (i = 0; i < commands_count; ++i) {
 		if (commands[i].cmd == CMD_DEFAULT) {
 			default_name = commands[i].val;
-		} else if (commands[i].cmd == CMD_RAUC_UBOOT_PART) {
-			/* Global RAUC directive: U-Boot env partition */
-			rauc_uboot_part = commands[i].val;
-		} else if (commands[i].cmd == CMD_RAUC_UBOOT_OFFSET) {
-			/* Global RAUC directive: U-Boot env offset (supports hex with 0x prefix) */
-			rauc_uboot_offset = parse_u64(commands[i].val);
-		} else if (commands[i].cmd == CMD_RAUC_UBOOT_SIZE) {
-			/* Global RAUC directive: U-Boot env size (supports hex with 0x prefix) */
-			rauc_uboot_size = (size_t)parse_u64(commands[i].val);
-		} else if (commands[i].cmd == CMD_RAUC_BOOT_PART_A) {
-			/* Global RAUC directive: Boot partition for slot A */
-			rauc_boot_part_a = commands[i].val;
-		} else if (commands[i].cmd == CMD_RAUC_BOOT_PART_B) {
-			/* Global RAUC directive: Boot partition for slot B */
-			rauc_boot_part_b = commands[i].val;
+		} else if (commands[i].cmd == CMD_AB_ENV_PART) {
+			ab_env_part = commands[i].val; /* env partition name */
+		} else if (commands[i].cmd == CMD_AB_ENV_OFFSET) {
+			ab_env_offset = parse_u64(commands[i].val);
+		} else if (commands[i].cmd == CMD_AB_ENV_SIZE) {
+			ab_env_size = (size_t)parse_u64(commands[i].val);
+		} else if (commands[i].cmd == CMD_AB_SLOT_OFFSET_A) {
+			ab_slot_offset_a = parse_u64(commands[i].val);
+		} else if (commands[i].cmd == CMD_AB_SLOT_OFFSET_B) {
+			ab_slot_offset_b = parse_u64(commands[i].val);
 		} else if (commands[i].cmd == CMD_LABEL) {
 			label_idx++;
 			labels[label_idx].name = commands[i].val;
@@ -347,13 +350,11 @@ static int parse_conf(char *data, size_t size, struct label *label)
 			case CMD_FDTDIR:
 				labels[label_idx].dtbdir = commands[i].val;
 				break;
-			case CMD_FDTOVERLAY:
+			case CMD_FDTOVERLAY: {
 				for (char *c = commands[i].val; *c; c++)
 					if (*c == ' ')
 						cnt++;
-
 				cnt += 2;
-
 				labels[label_idx].dtboverlays = calloc(cnt, sizeof(*labels[label_idx].dtboverlays));
 				cnt = 0;
 				for (overlay = strtok_r(commands[i].val, " ", &saveptr); overlay;
@@ -361,7 +362,7 @@ static int parse_conf(char *data, size_t size, struct label *label)
 					labels[label_idx].dtboverlays[cnt] = overlay;
 					cnt++;
 				}
-				break;
+				break; }
 			default:
 				break;
 			}
@@ -370,16 +371,13 @@ static int parse_conf(char *data, size_t size, struct label *label)
 
 	default_label = &labels[0];
 
-	/* Initialize RAUC A/B boot if configured in extlinux.conf */
-	if (rauc_uboot_part && rauc_uboot_offset > 0) {
-		dprintf(INFO, "extlinux: Initializing RAUC A/B from partition '%s' offset 0x%llx size 0x%zx\n",
-			rauc_uboot_part, rauc_uboot_offset, rauc_uboot_size);
-		lk2nd_boot_ab_init(rauc_uboot_part, rauc_uboot_offset, rauc_uboot_size);
-
-		/* Configure boot partition names if specified */
-		if (rauc_boot_part_a || rauc_boot_part_b) {
-			lk2nd_boot_ab_set_partitions(rauc_boot_part_a, rauc_boot_part_b);
-		}
+	/* Initialize generic A/B boot if configured */
+	if (ab_env_part && ab_env_offset > 0) {
+		dprintf(INFO, "extlinux: A/B env %s offset 0x%llx size 0x%zx\n",
+			ab_env_part, ab_env_offset, ab_env_size);
+		lk2nd_boot_ab_init(ab_env_part, ab_env_offset, ab_env_size);
+		if (ab_slot_offset_a > 0 || ab_slot_offset_b > 0)
+			lk2nd_boot_ab_set_offsets(ab_slot_offset_a, ab_slot_offset_b);
 	}
 
 	/*

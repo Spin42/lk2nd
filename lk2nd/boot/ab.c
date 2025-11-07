@@ -4,60 +4,40 @@
 #include <debug.h>
 #include <stdlib.h>
 #include <string.h>
+#include <lib/bio.h>
+#include <list.h>
 
 #include "boot.h"
 #include "ubootenv.h"
 
 /*
- * RAUC-compatible A/B Boot Implementation for lk2nd
+ * RAUC-compatible A/B Boot Implementation for lk2nd (offset-only)
  *
  * This implements the RAUC bootloader interface using U-Boot environment variables.
  * The bootloader reads these variables from a U-Boot environment block typically
- * stored at a fixed offset within the userdata partition.
+ * stored at a fixed offset within a base partition (e.g., userdata).
  *
  * Configuration via extlinux.conf (recommended):
- *   # U-Boot environment location
- *   rauc_uboot_part userdata
+ *   # U-Boot environment location (base device and env window)
+ *   rauc_uboot_part mmcblk0p20
  *   rauc_uboot_offset 0x10000
  *   rauc_uboot_size 0x20000
  *
- *   # Boot partition names for A/B slots
- *   rauc_boot_part_a boot-a
- *   rauc_boot_part_b boot-b
- *
- *   # Boot configuration (same extlinux.conf in both boot-a and boot-b partitions)
- *   default linux
- *   label linux
- *       kernel /vmlinuz
- *       initrd /initramfs
- *       append root=/dev/mapper/image-rootfs_a
- *
- * OR using slot-specific labels (if both slots share same partition):
- *   label linux_A
- *       kernel /vmlinuz-A
- *       initrd /initramfs-A
- *       append root=/dev/mapper/image-rootfs_a
- *   label linux_B
- *       kernel /vmlinuz-B
- *       initrd /initramfs-B
- *       append root=/dev/mapper/image-rootfs_b
+ *   # Boot slot offsets within the same base device (sub-partitions)
+ *   rauc_boot_offset_a 0x00100000   # 1 MiB
+ *   rauc_boot_offset_b 0x04100000   # 1 MiB + 64 MiB
  *
  * Boot Flow:
- * 1. Initialize: Read U-Boot env from partition at configured offset
- * 2. Select partition: lk2nd scans only the partition for the active slot (boot-a or boot-b)
- * 3. Pre-boot: Determine active slot from BOOT_ORDER, decrement counter
- * 4. Boot: System boots selected slot using extlinux.conf from that partition
- * 5. Userspace marks boot successful by writing directly to U-Boot env
+ * 1. Initialize: Read U-Boot env from the base device at configured offset
+ * 2. Select slot: Determine current slot from BOOT_ORDER and remaining attempts
+ * 3. Pre-boot: Decrement boot counter (BOOT_<slot>_LEFT) and save the env
+ * 4. Boot: Publish a subdevice at the selected slot offset, mount it, and load extlinux
+ * 5. Userspace: On success, reset counters in the U-Boot env (e.g., using fw_setenv)
  *
  * Environment Variables (RAUC-standard):
  * - BOOT_ORDER: Space-separated slot list to try (e.g., "A B")
  * - BOOT_A_LEFT: Remaining boot attempts for slot A
  * - BOOT_B_LEFT: Remaining boot attempts for slot B
- *
- * Userspace Integration:
- * After successful boot, userspace must write directly to the U-Boot environment
- * partition to reset BOOT_<slot>_LEFT counter. This can be done using fw_setenv
- * tool or direct partition writes at the configured offset.
  */
 
 /* Global A/B boot state */
@@ -68,9 +48,74 @@ static struct {
 	size_t size;
 	bool initialized;
 	char current_slot;  /* Cached current boot slot */
-	char boot_part_a[64];  /* Boot partition name for slot A */
-	char boot_part_b[64];  /* Boot partition name for slot B */
+	uint64_t boot_offset_a;  /* Boot partition offset for slot A (0 = no offset) */
+	uint64_t boot_offset_b;  /* Boot partition offset for slot B (0 = no offset) */
 } ab_state = {0};
+
+/*
+ * Resolve a base device spec (from extlinux) to an actual bdev name:
+ * - Try the name as-is
+ * - If it's a Linux-style name like "mmcblk0pN", map to our wrapper device
+ *   name "wrp0pN"
+ * - Otherwise, try to find a device by GPT label match
+ * Returns true and writes normalized name into out if found.
+ */
+static bool resolve_base_device(const char *spec, char *out, size_t out_len)
+{
+	bdev_t *b;
+
+	if (!spec || !out || out_len == 0)
+		return false;
+
+	/* 1) Try as-is */
+	b = bio_open(spec);
+	if (b) {
+		strlcpy(out, spec, out_len);
+		bio_close(b);
+		return true;
+	}
+
+	/* 2) Map Linux-style mmcblkXpN -> wrp0p(N-1) (wrapper is zero-based) */
+	if (!strncmp(spec, "mmcblk", 6)) {
+		const char *p = strrchr(spec, 'p');
+		if (p && *(p+1)) {
+			unsigned part = 0;
+			const char *num = p + 1;
+			/* parse decimal partition number */
+			while (*num >= '0' && *num <= '9') {
+				part = part * 10 + (*num - '0');
+				num++;
+			}
+			if (part > 0) {
+				char mapped[32];
+				/* wrapper uses wrp0p<zero-based> */
+				snprintf(mapped, sizeof(mapped), "wrp0p%u", part - 1);
+				b = bio_open(mapped);
+				if (b) {
+					strlcpy(out, mapped, out_len);
+					bio_close(b);
+					return true;
+				}
+			}
+		}
+	}
+
+	/* 3) Search by GPT label */
+	{
+		struct bdev_struct *bdevs = bio_get_bdevs();
+		bdev_t *iter;
+		list_for_every_entry(&bdevs->list, iter, bdev_t, node) {
+			if (!iter->is_leaf)
+				continue;
+			if (iter->label && !strcmp(iter->label, spec)) {
+				strlcpy(out, iter->name, out_len);
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
 
 /*
  * Initialize A/B boot from U-Boot environment
@@ -81,6 +126,7 @@ static struct {
 void lk2nd_boot_ab_init(const char *partition, uint64_t offset, size_t size)
 {
 	int ret;
+	char resolved[64];
 
 	if (ab_state.initialized) {
 		dprintf(INFO, "A/B boot already initialized\n");
@@ -95,16 +141,21 @@ void lk2nd_boot_ab_init(const char *partition, uint64_t offset, size_t size)
 	if (size == 0)
 		size = UBOOT_ENV_DEFAULT_SIZE;
 
-	dprintf(INFO, "Initializing RAUC-style A/B boot from %s at offset 0x%llx (size: 0x%zx)\n",
-		partition, offset, size);
+	if (!resolve_base_device(partition, resolved, sizeof(resolved))) {
+		dprintf(CRITICAL, "A/B boot: Failed to resolve base device '%s'\n", partition);
+		return;
+	}
 
-	ret = uboot_env_init(&ab_state.env, partition, offset, size);
+	dprintf(INFO, "Initializing RAUC-style A/B boot from %s (resolved from '%s') at offset 0x%llx (size: 0x%zx)\n",
+		resolved, partition, offset, size);
+
+	ret = uboot_env_init(&ab_state.env, resolved, offset, size);
 	if (ret < 0) {
 		dprintf(CRITICAL, "A/B boot: Failed to initialize U-Boot environment: %d\n", ret);
 		return;
 	}
 
-	strlcpy(ab_state.partition, partition, sizeof(ab_state.partition));
+	strlcpy(ab_state.partition, resolved, sizeof(ab_state.partition));
 	ab_state.offset = offset;
 	ab_state.size = size;
 	ab_state.initialized = true;
@@ -167,34 +218,43 @@ void lk2nd_boot_ab_pre_boot(void)
 	uboot_env_save(&ab_state.env, ab_state.partition, ab_state.offset);
 }
 
-/*
- * Set boot partition names for A/B slots
- * This tells lk2nd which partition to scan for each slot
- */
-void lk2nd_boot_ab_set_partitions(const char *part_a, const char *part_b)
-{
-	if (part_a)
-		strlcpy(ab_state.boot_part_a, part_a, sizeof(ab_state.boot_part_a));
-	if (part_b)
-		strlcpy(ab_state.boot_part_b, part_b, sizeof(ab_state.boot_part_b));
-
-	dprintf(INFO, "A/B boot partitions: A='%s', B='%s'\n",
-		ab_state.boot_part_a, ab_state.boot_part_b);
-}
-
-/*
- * Get the boot partition name for the current slot
- * Returns NULL if not configured or A/B not initialized
- */
-const char *lk2nd_boot_ab_get_partition(void)
+/* Return the base device name used for boot (same as U-Boot env partition) */
+const char *lk2nd_boot_ab_get_base_device(void)
 {
 	if (!ab_state.initialized)
 		return NULL;
+	return ab_state.partition;
+}
 
-	if (ab_state.current_slot == 'A' && ab_state.boot_part_a[0])
-		return ab_state.boot_part_a;
-	else if (ab_state.current_slot == 'B' && ab_state.boot_part_b[0])
-		return ab_state.boot_part_b;
+/*
+ * Set boot partition offsets for A/B slots
+ * Use this when boot partitions are sub-partitions within a main partition
+ * (e.g., boot-a at offset 0x100000 within userdata)
+ */
+void lk2nd_boot_ab_set_offsets(uint64_t offset_a, uint64_t offset_b)
+{
+	ab_state.boot_offset_a = offset_a;
+	ab_state.boot_offset_b = offset_b;
 
-	return NULL;
+	dprintf(INFO, "A/B boot offsets: A=0x%llx, B=0x%llx\n",
+		ab_state.boot_offset_a, ab_state.boot_offset_b);
+}
+
+/* No partition names anymore: only offsets per slot are used */
+
+/*
+ * Get the boot partition offset for the current slot
+ * Returns 0 if not configured or no offset needed
+ */
+uint64_t lk2nd_boot_ab_get_offset(void)
+{
+	if (!ab_state.initialized)
+		return 0;
+
+	if (ab_state.current_slot == 'A')
+		return ab_state.boot_offset_a;
+	else if (ab_state.current_slot == 'B')
+		return ab_state.boot_offset_b;
+
+	return 0;
 }
