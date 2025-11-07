@@ -83,6 +83,24 @@ continuing with the usual workflow. This is useful for debugging and development
 This can help with debugging on devices with carkit uart.
 You need to switch the cable before starting linux to see all the logs.
 
+#### `UMS_ENABLE=` - Enable USB Mass Storage mode
+
+By setting this option to 1, lk2nd will include UMS (USB Mass Storage) support and show a countdown during boot allowing entry into mass storage mode.
+
+```
+$ make TOOLCHAIN_PREFIX=arm-none-eabi- UMS_ENABLE=1 lk2nd-msmXXXX
+```
+
+When enabled, lk2nd will display a 3-second countdown during boot. Press any key during the countdown to enter UMS mode, which exposes the userdata partition as a USB mass storage device for direct access from a PC.
+
+#### `UMS_COUNTDOWN_SECONDS=` - Set UMS countdown duration
+
+Set the number of seconds to wait for keypress before continuing normal boot (default: 3).
+
+```
+$ make TOOLCHAIN_PREFIX=arm-none-eabi- UMS_ENABLE=1 UMS_COUNTDOWN_SECONDS=5 lk2nd-msmXXXX
+```
+
 ### lk2nd specific
 
 #### `LK2ND_ADTBS=`, `LK2ND_QCDTBS=`, `LK2ND_DTBS=` - Only build listed dtbs
