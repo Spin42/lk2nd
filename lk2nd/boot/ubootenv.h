@@ -38,6 +38,7 @@ struct uboot_env {
 	size_t size;
 	size_t data_size;
 	bool dirty;
+	bool has_flags;        /* true: format is [CRC][flags][data], false: [CRC][data] */
 
 	/* Parsed RAUC-style boot state (cached for performance) */
 	char boot_order[32];     /* BOOT_ORDER value (e.g., "A B") */
