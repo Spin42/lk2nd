@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <lib/bio.h>
 #include <crc32.h>
+#include <endian.h>
 
 #include "ubootenv.h"
 
@@ -15,7 +16,11 @@
 /* Calculate CRC32 for U-Boot environment */
 static uint32_t uboot_env_crc(const uint8_t *data, size_t len)
 {
-	return crc32(0, data, len);
+	/* U-Boot uses CRC32 with initial value 0xFFFFFFFF and final XOR 0xFFFFFFFF
+	 * The crc32() function in platform/msm_shared/crc32.c does NOT do the
+	 * pre/post-conditioning, so we need to do it manually */
+	uint32_t crc = crc32(0xFFFFFFFF, data, len);
+	return crc ^ 0xFFFFFFFF;
 }
 
 /* Parse RAUC boot variables from environment and cache them */
@@ -88,29 +93,61 @@ int uboot_env_init(struct uboot_env *env, const char *partition, uint64_t offset
 		return -1;
 	}
 
-	/* Parse header: CRC32 (4 bytes) + flags (1 byte) + data */
-	env->crc = *(uint32_t *)buffer;
-	env->flags = buffer[4];
+	/* Try to parse as either redundant (CRC+flags+data) or non-redundant (CRC+data)
+	 * U-Boot stores CRC32 in little-endian format regardless of system endianness */
 	env->size = size;
-	env->data_size = size - 5;  /* Subtract header size */
+	uint32_t stored_crc = LE32(*(uint32_t *)buffer);
 
-	/* Allocate and copy data */
-	env->data = malloc(env->data_size);
-	if (!env->data) {
+	/* First, attempt redundant format (flags at byte 4) */
+	uint8_t flags_candidate = buffer[4];
+	size_t data_size_redundant = size - 5;
+	uint32_t crc_redundant = uboot_env_crc(buffer + 5, data_size_redundant);
+
+	/* Then, attempt non-redundant format (no flags byte) */
+	size_t data_size_plain = size - 4;
+	uint32_t crc_plain = uboot_env_crc(buffer + 4, data_size_plain);
+
+	if (crc_redundant == stored_crc && (flags_candidate == 0 || flags_candidate == 1)) {
+		/* Accept redundant format */
+		env->has_flags = true;
+		env->crc = stored_crc;
+		env->flags = flags_candidate;
+		env->data_size = data_size_redundant;
+		env->data = malloc(env->data_size);
+		if (!env->data) {
+			free(buffer);
+			return -1;
+		}
+		memcpy(env->data, buffer + 5, env->data_size);
 		free(buffer);
-		return -1;
-	}
-	memcpy(env->data, buffer + 5, env->data_size);
-	free(buffer);
-
-	/* Verify CRC */
-	uint32_t calculated_crc = uboot_env_crc((uint8_t *)env->data, env->data_size);
-	if (calculated_crc != env->crc) {
-		dprintf(INFO, "ubootenv: CRC mismatch (calculated: 0x%x, stored: 0x%x), initializing clean env\n",
-			calculated_crc, env->crc);
-		/* Initialize with empty environment */
+	} else if (crc_plain == stored_crc) {
+		/* Accept non-redundant format */
+		env->has_flags = false;
+		env->crc = stored_crc;
+		env->flags = 0; /* not used */
+		env->data_size = data_size_plain;
+		env->data = malloc(env->data_size);
+		if (!env->data) {
+			free(buffer);
+			return -1;
+		}
+		memcpy(env->data, buffer + 4, env->data_size);
+		free(buffer);
+	} else {
+		/* Neither matched: initialize empty environment using non-redundant format by default */
+		env->has_flags = false;
+		env->crc = 0;
+		env->flags = 0;
+		env->data_size = data_size_plain;
+		env->data = malloc(env->data_size);
+		if (!env->data) {
+			free(buffer);
+			return -1;
+		}
 		memset(env->data, 0, env->data_size);
+		free(buffer);
 		env->dirty = true;
+		dprintf(INFO, "ubootenv: CRC mismatch, initializing clean env (non-redundant)\n");
 	}
 
 	/* Parse RAUC A/B boot variables */
@@ -227,9 +264,16 @@ int uboot_env_save(struct uboot_env *env, const char *partition, uint64_t offset
 	if (!buffer)
 		return -1;
 
-	*(uint32_t *)buffer = env->crc;
-	buffer[4] = UBOOT_ENV_FLAG_ACTIVE;
-	memcpy(buffer + 5, env->data, env->data_size);
+	memset(buffer, 0, env->size);
+	/* Write CRC in little-endian format (U-Boot standard) */
+	*(uint32_t *)buffer = LE32(env->crc);
+	if (env->has_flags) {
+		buffer[4] = UBOOT_ENV_FLAG_ACTIVE;
+		memcpy(buffer + 5, env->data, env->data_size);
+	} else {
+		/* Non-redundant format: CRC + data */
+		memcpy(buffer + 4, env->data, env->data_size);
+	}
 
 	/* Write to partition */
 	bdev = bio_open(partition);

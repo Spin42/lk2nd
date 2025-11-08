@@ -15,6 +15,7 @@
 #include <stdbool.h>
 
 #include <lk2nd/device/keys.h>
+#include <lk2nd/device/menu.h>
 #include <lk2nd/util/minmax.h>
 #include <lk2nd/version.h>
 
