@@ -37,7 +37,12 @@
 #include <string.h>
 #include <malloc.h>
 #include <stdlib.h>
+#include <sys/types.h>
+#include <stdint.h>
+#include <stdbool.h>
 #include <arch/defines.h>
+#include <hw/usb.h>
+#include <arch/ops.h>
 #include <dev/udc.h>
 #include <platform/iomap.h>
 #include <usb30_dwc.h>
@@ -48,6 +53,11 @@
 #include <platform/timer.h>
 #include <qmp_phy.h>
 #include <usb30_dwc_hw.h>
+
+/* Fallback for CACHE_LINE if target CPU macro isn't set early */
+#ifndef CACHE_LINE
+#define CACHE_LINE 64
+#endif
 
 //#define DEBUG_USB
 
@@ -680,6 +690,49 @@ static int udc_handle_setup(void *context, uint8_t *data)
 				return DWC_SETUP_2_STAGE;
 		}
 		break;
+	case SETUP(INTERFACE_READ, MASS_STORAGE_GET_MAX_LUN):
+		{
+			DBG("\n MSC CLASS : GET_MAX_LUN");
+			if (s.length == 1) {
+				uint8_t lun = 0; /* single LUN */
+				memcpy(udc->ctrl_tx_buf, &lun, 1);
+				arch_clean_invalidate_cache_range((addr_t) udc->ctrl_tx_buf, 1);
+				dwc_transfer_request(udc->dwc, 0, DWC_EP_DIRECTION_IN, udc->ctrl_tx_buf, 1, NULL, NULL);
+				return DWC_SETUP_3_STAGE;
+			}
+			goto stall;
+		}
+		break;
+	/* Also accept class-specific GET_MAX_LUN (bmRequestType 0xA1) */
+	case SETUP((DIR_IN | TYPE_CLASS | RECIP_INTERFACE), MASS_STORAGE_GET_MAX_LUN):
+		{
+			DBG("\n MSC CLASS(CLASS) : GET_MAX_LUN");
+			if (s.length == 1) {
+				uint8_t lun = 0;
+				memcpy(udc->ctrl_tx_buf, &lun, 1);
+				arch_clean_invalidate_cache_range((addr_t) udc->ctrl_tx_buf, 1);
+				dwc_transfer_request(udc->dwc, 0, DWC_EP_DIRECTION_IN, udc->ctrl_tx_buf, 1, NULL, NULL);
+				return DWC_SETUP_3_STAGE;
+			}
+			goto stall;
+		}
+		break;
+	case SETUP(INTERFACE_WRITE, MASS_STORAGE_RESET):
+		{
+			DBG("\n MSC CLASS : MASS_STORAGE_RESET");
+			/* Note: No explicit flush API available here; DWC layer will NAK/clear on reconfig. */
+			/* Re-enable known bulk eps (if any were stalled) */
+			/* DWC layer will NAK pending transfers; gadget will restart BOT */
+			return DWC_SETUP_2_STAGE;
+		}
+		break;
+	/* Also accept class-specific RESET (bmRequestType 0x21) */
+	case SETUP((DIR_OUT | TYPE_CLASS | RECIP_INTERFACE), MASS_STORAGE_RESET):
+		{
+			DBG("\n MSC CLASS(CLASS) : MASS_STORAGE_RESET");
+			return DWC_SETUP_2_STAGE;
+		}
+		break;
 	case SETUP(INTERFACE_READ, GET_INTERFACE):
 		{
 			DBG("\n INTERFACE_READ : GET_INTERFACE");
@@ -892,6 +945,15 @@ int usb30_udc_request_queue(struct udc_endpoint *ept, struct udc_request *req)
 	}
 
 	DBG("\n udc_request_queue: entry: ep_usb_num = %d", ept->num);
+
+	/* Perform cache maintenance on the data buffer based on transfer direction.
+	 * For IN (device->host), clean+invalidate to push data to RAM for DMA read.
+	 * For OUT (host->device), invalidate to avoid stale cache before DMA write. */
+	if (ept->in) {
+		arch_clean_invalidate_cache_range((addr_t) req->buf, ROUNDUP(req->length, CACHE_LINE));
+	} else {
+		arch_invalidate_cache_range((addr_t) req->buf, ROUNDUP(req->length, CACHE_LINE));
+	}
 
 	/* save the queued request. */
 	udc_dev->queued_req = req;

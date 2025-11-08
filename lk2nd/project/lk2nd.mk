@@ -5,7 +5,7 @@ LK2ND_SKIP_GDSC_CHECK ?= 0
 # When set to 1, render the fastboot/lk2nd menu on the serial console instead of the framebuffer
 LK2ND_SERIAL_MENU ?= 0
 UMS_ENABLE ?= 0
-UMS_COUNTDOWN_SECONDS ?= 3
+UMS_COUNTDOWN_SECONDS ?= 10
 UMS_PARTITION ?= userdata
 include lk2nd/project/base.mk
 

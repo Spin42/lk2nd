@@ -78,12 +78,10 @@ struct cbw;
 
 /* Configuration */
 #ifndef UMS_COUNTDOWN_SECONDS
-#define UMS_COUNTDOWN_SECONDS   3
+#define UMS_COUNTDOWN_SECONDS   10
 #endif
 
-
-
-#define UMS_BUFFER_SIZE         (64 * 1024)  /* 64KB buffer for transfers */
+#define UMS_BUFFER_SIZE         (128 * 1024)  /* 128KB buffer for transfers (was 64KB - too small for some hosts) */
 #define UMS_MAX_PARTITION_NAME  32
 
 /* Command Block Wrapper (CBW) */

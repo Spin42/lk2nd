@@ -141,12 +141,22 @@ static void opt_shutdown(void)   { shutdown_device(); }
 extern int ums_enter_mode(const char *partition_name);
 static void opt_ums(void)
 {
-	dprintf(ALWAYS, "Entering USB Mass Storage mode...\n");
-	if (ums_enter_mode(UMS_PARTITION) == 0) {
-		dprintf(ALWAYS, "UMS mode ended, rebooting...\n");
+	dprintf(ALWAYS, "[MENU] Entering USB Mass Storage mode... (partition='%s')\n", UMS_PARTITION);
+	dprintf(ALWAYS, "[MENU] Calling ums_enter_mode()...\n");
+	/* Ensure block devices are initialized before UMS attempts a mount */
+	extern void lk2nd_bdev_init(void);
+	static bool bdev_init_done;
+	if (!bdev_init_done) {
+		lk2nd_bdev_init();
+		bdev_init_done = true;
+	}
+	int ret = ums_enter_mode(UMS_PARTITION);
+	dprintf(ALWAYS, "[MENU] ums_enter_mode() returned %d\n", ret);
+	if (ret == 0) {
+		dprintf(ALWAYS, "[MENU] UMS mode ended (or already active exit), rebooting...\n");
 		reboot_device(0);
 	} else {
-		dprintf(CRITICAL, "UMS mode failed\n");
+		dprintf(CRITICAL, "[MENU] UMS mode failed (ret=%d)\n", ret);
 		thread_sleep(2000);
 	}
 }

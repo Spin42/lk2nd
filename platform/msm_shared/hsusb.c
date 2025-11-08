@@ -33,6 +33,10 @@
 #include <string.h>
 #include <stdlib.h>
 #include <debug.h>
+#include <sys/types.h>
+#include <stdint.h>
+#include <arch/defines.h>
+#include <hw/usb.h>
 #include <platform.h>
 #include <platform/iomap.h>
 #include <platform/irqs.h>
@@ -46,6 +50,9 @@
 
 #define MAX_TD_XFER_SIZE  (16 * 1024)
 
+#include <arch/ops.h>
+
+/* MSC class request codes provided by <hw/usb.h> */
 BUF_DMA_ALIGN(transfer_desc_item, ROUNDUP(sizeof(struct ept_queue_item), CACHE_LINE));
 
 /* common code - factor out into a shared file */
@@ -640,6 +647,34 @@ static void handle_setup(struct udc_endpoint *ept)
 			}
 			break;
 		}
+	case SETUP(INTERFACE_READ, MASS_STORAGE_GET_MAX_LUN):
+		/* USB MSC class request: return number of LUNs (0 => only LUN0) */
+		if (s.length == 1) {
+			unsigned char lun = 0; /* single LUN */
+			setup_tx(&lun, 1);
+			return; /* 3-stage handled */
+		}
+		break;
+	case SETUP(INTERFACE_WRITE, MASS_STORAGE_RESET):
+		/* USB MSC Bulk-Only Reset: flush endpoints and ack */
+		writel(0xffffffff, USB_ENDPTFLUSH); /* flush all pending */
+		/* Clear halt bits on bulk endpoints (re-enable) */
+		{
+			struct udc_endpoint *ept;
+			for (ept = ept_list; ept; ept = ept->next) {
+				if (ept->num == 0) continue; /* skip ep0 */
+				/* Clear STALL bits on the endpoint control register */
+				unsigned ctrl = readl(USB_ENDPTCTRL(ept->num));
+				if (ept->in)
+					ctrl &= ~(CTRL_TXS | CTRL_TXD);
+				else
+					ctrl &= ~(CTRL_RXS | CTRL_RXD);
+				writel(ctrl, USB_ENDPTCTRL(ept->num));
+				endpoint_enable(ept, 1);
+			}
+		}
+		setup_ack();
+		return; /* 2-stage */
 	}
 
 	dprintf(INFO, "STALL %s %d %d %d %d %d\n",
@@ -674,24 +709,28 @@ void ulpi_write(unsigned val, unsigned reg)
 
 int udc_init(struct udc_device *dev)
 {
-	DBG("udc_init():\n");
+	dprintf(ALWAYS, "HSUSB: udc_init() entry (dev=%p vid=%04x pid=%04x)\n", dev, dev ? dev->vendor_id : 0, dev ? dev->product_id : 0);
 
 	hsusb_clock_init();
 
 	/* RESET */
 	writel(0x00080002, USB_USBCMD);
+	dprintf(ALWAYS, "HSUSB: issued controller reset\n");
 
 	thread_sleep(20);
 
 	while((readl(USB_USBCMD)&2));
+	dprintf(ALWAYS, "HSUSB: reset complete\n");
 
 	/* select ULPI phy */
 	writel(0x80000000, USB_PORTSC);
+	dprintf(ALWAYS, "HSUSB: ULPI phy selected (USB_PORTSC=%08x)\n", readl(USB_PORTSC));
 
 	/* Do any target specific intialization like GPIO settings,
 	 * LDO, PHY configuration etc. needed before USB port can be used.
 	 */
 	target_usb_init();
+	dprintf(ALWAYS, "HSUSB: target_usb_init() done\n");
 
 	/* USB_OTG_HS_AHB_BURST */
 	writel(0x0, USB_SBUSCFG);
@@ -701,23 +740,28 @@ int udc_init(struct udc_device *dev)
 	writel(0x08, USB_AHB_MODE);
 
 	epts = memalign(lcm(4096, CACHE_LINE), ROUNDUP(4096, CACHE_LINE));
+	dprintf(ALWAYS, "HSUSB: memalign queue heads result=%p\n", epts);
 	ASSERT(epts);
 
-	dprintf(INFO, "USB init ept @ %p\n", epts);
+	dprintf(ALWAYS, "HSUSB: allocated queue heads @%p\n", epts);
 	memset(epts, 0, 32 * sizeof(struct ept_queue_head));
 	arch_clean_invalidate_cache_range((addr_t) epts,
 					  32 * sizeof(struct ept_queue_head));
 
 	writel((unsigned)PA((addr_t)epts), USB_ENDPOINTLISTADDR);
+	dprintf(ALWAYS, "HSUSB: endpoint list addr set to %08x\n", (unsigned)PA((addr_t)epts));
 
 	/* select DEVICE mode */
 	writel(0x02, USB_USBMODE);
+	dprintf(ALWAYS, "HSUSB: USB mode DEV set (USBMODE=%08x)\n", readl(USB_USBMODE));
 
 	writel(0xffffffff, USB_ENDPTFLUSH);
+	dprintf(ALWAYS, "HSUSB: endpoint flush issued\n");
 	thread_sleep(20);
 
 	ep0out = _udc_endpoint_alloc(0, 0, 64);
 	ep0in = _udc_endpoint_alloc(0, 1, 64);
+	dprintf(ALWAYS, "HSUSB: EP0 allocated in/out (%p/%p)\n", ep0in, ep0out);
 	ep0req = udc_request_alloc();
 	ep0req->buf = memalign(CACHE_LINE, ROUNDUP(4096, CACHE_LINE));
 
@@ -730,8 +774,10 @@ int udc_init(struct udc_device *dev)
 		desc->data[3] = 0x04;
 		udc_descriptor_register(desc);
 	}
+	dprintf(ALWAYS, "HSUSB: descriptors prepared, exiting udc_init()\n");
 
 	the_device = dev;
+	dprintf(ALWAYS, "HSUSB: udc_init() success\n");
 	return 0;
 }
 
