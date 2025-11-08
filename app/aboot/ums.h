@@ -77,10 +77,6 @@ struct cbw;
 #define SCSI_ASC_MEDIUM_NOT_PRESENT 0x3A
 
 /* Configuration */
-#ifndef UMS_COUNTDOWN_SECONDS
-#define UMS_COUNTDOWN_SECONDS   10
-#endif
-
 #define UMS_BUFFER_SIZE         (128 * 1024)  /* 128KB buffer for transfers (was 64KB - too small for some hosts) */
 #define UMS_MAX_PARTITION_NAME  32
 
@@ -167,7 +163,6 @@ struct ums_device {
 };
 
 /* Function prototypes */
-int ums_countdown_check(void);
 int ums_enter_mode(const char *partition_name);
 void ums_exit_mode(void);
 int ums_init(void);

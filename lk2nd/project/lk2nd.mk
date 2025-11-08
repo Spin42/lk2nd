@@ -4,8 +4,10 @@ LK2ND_DISPLAY ?= cont-splash
 LK2ND_SKIP_GDSC_CHECK ?= 0
 # When set to 1, render the fastboot/lk2nd menu on the serial console instead of the framebuffer
 LK2ND_SERIAL_MENU ?= 0
+# Boot menu countdown duration in seconds (before auto-booting)
+MENU_COUNTDOWN_SECONDS ?= 10
+# USB Mass Storage configuration
 UMS_ENABLE ?= 0
-UMS_COUNTDOWN_SECONDS ?= 10
 UMS_PARTITION ?= userdata
 include lk2nd/project/base.mk
 
@@ -18,10 +20,12 @@ ifeq ($(LK2ND_SKIP_GDSC_CHECK),1)
 DEFINES += LK2ND_SKIP_GDSC_CHECK=1
 endif
 
+# Boot menu countdown (applies when UMS_ENABLE=1 or other boot menu triggers)
+DEFINES += MENU_COUNTDOWN_SECONDS=$(MENU_COUNTDOWN_SECONDS)
+
 # USB Mass Storage support
 ifeq ($(UMS_ENABLE),1)
 DEFINES += UMS_ENABLE=1
-DEFINES += UMS_COUNTDOWN_SECONDS=$(UMS_COUNTDOWN_SECONDS)
 DEFINES += UMS_PARTITION="$(UMS_PARTITION)"
 endif
 
