@@ -83,37 +83,50 @@ continuing with the usual workflow. This is useful for debugging and development
 This can help with debugging on devices with carkit uart.
 You need to switch the cable before starting linux to see all the logs.
 
+#### `MENU_COUNTDOWN_SECONDS=` - Boot menu countdown duration
+
+Set the number of seconds to wait for keypress during boot countdown before continuing normal boot (default: 10). The countdown is displayed when `UMS_ENABLE=1` or other conditions trigger the boot menu.
+
+```
+$ make TOOLCHAIN_PREFIX=arm-none-eabi- MENU_COUNTDOWN_SECONDS=5 lk2nd-msmXXXX
+```
+
 #### `UMS_ENABLE=` - Enable USB Mass Storage mode
 
-By setting this option to 1, lk2nd will include UMS (USB Mass Storage) support. When enabled, lk2nd shows a short countdown during early boot; pressing any key now opens the fastboot menu on the serial console where you can select "USB Storage" to enter Mass Storage mode.
+Set to 1 to enable USB Mass Storage support. When enabled, lk2nd displays a countdown during early boot. Press any key during the countdown to open the fastboot menu on the serial console, where you can select "USB Storage" to expose a partition as a USB mass storage device for direct access from a PC.
 
 ```
 $ make TOOLCHAIN_PREFIX=arm-none-eabi- UMS_ENABLE=1 lk2nd-msmXXXX
 ```
 
-When enabled, lk2nd will display a 3-second countdown during boot. Press any key during the countdown to open the serial fastboot menu. From there, choose "USB Storage" to expose the configured partition as a USB mass storage device for direct access from a PC.
+#### `UMS_PARTITION=` - Partition to export in UMS mode
 
-#### `UMS_COUNTDOWN_SECONDS=` - Set UMS countdown duration
-
-Set the number of seconds to wait for keypress before continuing normal boot (default: 3).
+Set the partition name to expose when entering USB Mass Storage mode via the menu (default: `userdata`). Can be any valid partition name like `system`, `userdata`, `cache`, etc.
 
 ```
-$ make TOOLCHAIN_PREFIX=arm-none-eabi- UMS_ENABLE=1 UMS_COUNTDOWN_SECONDS=5 lk2nd-msmXXXX
-#### `UMS_PARTITION=` - Partition to export in UMS
-
-Set the partition name to expose when entering USB Mass Storage mode via the menu (default: `userdata`).
-
-```
-$ make TOOLCHAIN_PREFIX=arm-none-eabi- UMS_ENABLE=1 UMS_PARTITION=userdata lk2nd-msmXXXX
+$ make TOOLCHAIN_PREFIX=arm-none-eabi- UMS_ENABLE=1 UMS_PARTITION=system lk2nd-msmXXXX
 ```
 
 #### `LK2ND_SERIAL_MENU=` - Force menu on serial console
 
-Set to 1 to always render the fastboot/lk2nd menu on the serial console (even if a framebuffer is present). Without this flag, the menu falls back to serial automatically if no display is available; with this flag it will prefer serial regardless.
+Set to 1 to always render the fastboot/lk2nd menu on the serial console instead of the framebuffer. Useful for headless devices or debugging via UART. The menu automatically falls back to serial when no display is available; this flag forces serial output regardless.
 
 ```
 $ make TOOLCHAIN_PREFIX=arm-none-eabi- LK2ND_SERIAL_MENU=1 lk2nd-msmXXXX
 ```
+
+#### Complete headless + UMS example
+
+For headless devices (no display) with UMS support:
+
+```
+$ make TOOLCHAIN_PREFIX=arm-none-eabi- \
+     LK2ND_SKIP_GDSC_CHECK=1 \
+     LK2ND_SERIAL_MENU=1 \
+     UMS_ENABLE=1 \
+     MENU_COUNTDOWN_SECONDS=10 \
+     UMS_PARTITION=userdata \
+     lk2nd-msmXXXX
 ```
 
 ### lk2nd specific

@@ -8,9 +8,11 @@
 #include <display_menu.h>
 #include <kernel/thread.h>
 #include <platform.h>
+#include <platform/timer.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <stdbool.h>
 
 #include <lk2nd/device/keys.h>
 #include <lk2nd/util/minmax.h>
@@ -20,6 +22,12 @@
 
 // Defined in app/aboot/aboot.c
 extern void cmd_continue(const char *arg, void *data, unsigned sz);
+extern int dgetc(char *c, bool wait);
+
+/* Configuration */
+#ifndef MENU_COUNTDOWN_SECONDS
+#define MENU_COUNTDOWN_SECONDS 10
+#endif
 
 #define FONT_WIDTH	(5+1)
 #define FONT_HEIGHT	12
@@ -335,8 +343,6 @@ void display_default_image_on_screen(void)
 	fbcon_flush();
 }
 
-extern int dgetc(char *c, bool wait);
-
 /**
  * display_serial_menu() - Display menu on serial console for headless operation
  */
@@ -424,4 +430,51 @@ static void display_serial_menu(void)
 			break;
 		}
 	}
+}
+
+/**
+ * boot_menu_countdown_check() - Display boot countdown and wait for keypress
+ *
+ * Displays a countdown timer on serial console and waits for user input.
+ * If any key is pressed during the countdown, returns 1 to indicate the user
+ * wants to enter the fastboot menu. Otherwise returns 0 to continue normal boot.
+ *
+ * Return: 1 if key pressed (enter menu), 0 if timeout (normal boot)
+ */
+int boot_menu_countdown_check(void)
+{
+	int countdown = MENU_COUNTDOWN_SECONDS;
+	char c;
+	bool triggered = false;
+
+	dprintf(ALWAYS, "\n=== lk2nd Boot Menu ===\n");
+	dprintf(ALWAYS, "Press any key within %d seconds to enter fastboot menu\n\n", countdown);
+
+	/* Drain any buffered input first */
+	while (dgetc(&c, false) == 0) { /* drain */ }
+
+	while (countdown > 0 && !triggered) {
+		dprintf(ALWAYS, "Booting in %d seconds...\r", countdown);
+
+		/* Wait 1 second while checking for keypress every 50ms */
+		for (int i = 0; i < 20; i++) {
+			if (dgetc(&c, false) == 0) {
+				dprintf(ALWAYS, "\n\nKey pressed - entering fastboot menu...\n");
+				triggered = true;
+				break;
+			}
+			thread_sleep(50);
+		}
+
+		if (!triggered) {
+			countdown--;
+		}
+	}
+
+	if (triggered) {
+		return 1;
+	}
+
+	dprintf(ALWAYS, "\n\nNo key pressed - continuing normal boot\n\n");
+	return 0;
 }

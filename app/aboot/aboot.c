@@ -95,10 +95,13 @@
 #include <menu_keys_detect.h>
 #include <display_menu.h>
 #include "fastboot_test.h"
+#ifdef UMS_ENABLE
 #include "ums.h"
+#endif
 
 #if WITH_LK2ND
 #include <lk2nd/init.h>
+#include <lk2nd/device/menu.h>
 #endif
 #if WITH_LK2ND_DEVICE
 #include <lk2nd/device.h>
@@ -5584,11 +5587,10 @@ void aboot_init(const struct app_descriptor *app)
 		goto normal_boot;
 
 #ifdef UMS_ENABLE
-	/* Repurposed: countdown now enters the fastboot/serial menu instead of launching UMS directly */
-	if (ums_countdown_check()) {
+	/* Show boot menu countdown - allows entering fastboot menu via serial console */
+	if (boot_menu_countdown_check()) {
 		boot_into_fastboot = true;
-		/* force menu even if other conditions would skip */
-		dprintf(INFO, "User requested boot menu via countdown.\n");
+		dprintf(INFO, "User requested boot menu via countdown\n");
 	}
 #endif
 
