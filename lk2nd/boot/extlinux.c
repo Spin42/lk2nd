@@ -382,39 +382,70 @@ static int parse_conf(char *data, size_t size, struct label *label)
 	 */
 	char slot = lk2nd_boot_ab_get_slot();
 
-	/* Only try slot-specific labels if slot is valid (not default 'A' fallback) */
+	/* If A/B slot is active, force selection of the _A or _B label; otherwise fallback to the default label. */
 	if (slot == 'A' || slot == 'B') {
 		char slot_name[128];
-		snprintf(slot_name, sizeof(slot_name), "%s_%c", default_name, slot);
+		bool found = false;
 
-		/* First try: default label with slot suffix (e.g., "linux_A") */
-		for (i = 0; i < labels_count; ++i) {
-			if (!strcmp(slot_name, labels[i].name)) {
-				default_label = &labels[i];
-				dprintf(INFO, "extlinux: Using A/B label '%s' for slot %c\n",
-					slot_name, slot);
-				goto found_label;
+		/* 1) If a default label name is set, try "<default>_<slot>" */
+		if (default_name && default_name[0] != '\0') {
+			snprintf(slot_name, sizeof(slot_name), "%s_%c", default_name, slot);
+			for (i = 0; i < labels_count; ++i) {
+				if (!strcmp(slot_name, labels[i].name)) {
+					default_label = &labels[i];
+					dprintf(INFO, "extlinux: Using A/B label '%s' for slot %c\n", slot_name, slot);
+					memcpy(label, default_label, sizeof(*label));
+					found = true;
+					break;
+				}
 			}
 		}
 
-		dprintf(SPEW, "extlinux: No A/B-specific label found, trying default\n");
-	}
-
-	/* Standard label matching: exact match for default label */
-	for (i = 0; i < labels_count; ++i) {
-		if (!strcmp(default_name, labels[i].name)) {
-			default_label = &labels[i];
-			dprintf(INFO, "extlinux: Using label '%s'\n", default_name);
-			break;
+		/* 2) If not found (or no default), try any label that ends with _A/_B */
+		if (!found) {
+			char suffix[4] = { '_', slot, '\0' };
+			for (i = 0; i < labels_count; ++i) {
+				const char *n = labels[i].name;
+				size_t ln = strlen(n), ls = strlen(suffix);
+				if (ln >= ls && !strcmp(n + (ln - ls), suffix)) {
+					default_label = &labels[i];
+					dprintf(INFO, "extlinux: Using A/B label '%s' (suffix match) for slot %c\n", n, slot);
+					memcpy(label, default_label, sizeof(*label));
+					found = true;
+					break;
+				}
+			}
 		}
+
+		if (!found) {
+			snprintf(slot_name, sizeof(slot_name), "%s_%c", (default_name && default_name[0]) ? default_name : "<default>", slot);
+			dprintf(CRITICAL, "extlinux: No label for slot '%s' found (no suffix match either), aborting boot!\n", slot_name);
+			free(labels);
+			free(commands);
+			return -1;
+		}
+		goto cleanup;
+	} else {
+		/* Standard label matching: exact match for default label */
+		for (i = 0; i < labels_count; ++i) {
+			if (!strcmp(default_name, labels[i].name)) {
+				default_label = &labels[i];
+				dprintf(INFO, "extlinux: Using label '%s'\n", default_name);
+				memcpy(label, default_label, sizeof(*label));
+				goto cleanup;
+			}
+		}
+		/* If default is not set or not found, fallback to the first label */
+		default_label = &labels[0];
+		dprintf(INFO, "extlinux: Default label '%s' not found, using first label '%s'\n",
+				default_name, default_label->name ? default_label->name : "<unnamed>");
+		memcpy(label, default_label, sizeof(*label));
+		goto cleanup;
 	}
 
-found_label:
-	memcpy(label, default_label, sizeof(*label));
-
+cleanup:
 	free(labels);
 	free(commands);
-
 	return 0;
 }
 
