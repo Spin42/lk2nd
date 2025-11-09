@@ -61,11 +61,72 @@ label MyOS
     append earlycon console=ttyMSM0,115200
 ```
 
+## Generic A/B partition boot (RAUC-style)
+
+lk2nd can perform A/B boot attempts using a U-Boot style environment stored inside a single underlying partition. This is compatible with the RAUC flow (decrement boot counters before attempting a slot; userspace resets counters after successful boot).
+
+### Concepts
+
+1. Environment partition: A single block device (e.g. `mmcblk0p20`) contains both the U-Boot environment and the two slot filesystems at different byte offsets.
+2. Environment (uboot.env): Stored at a fixed offset+size (defaults: offset `0x10000`, size `0x20000`).
+3. Slot offsets: Two byte offsets inside the same base device (example Fairphone 2: A=`0x00100000`, B=`0x04100000`). A subdevice is published at the chosen offset and mounted as an ext2 root.
+4. Boot counters: `BOOT_A_LEFT`, `BOOT_B_LEFT` are decremented on each attempt; if a counter reaches 0 lk2nd switches to the next slot in `BOOT_ORDER`.
+
+### Environment Variables
+
+Required / interpreted variables in the U-Boot environment:
+- `BOOT_ORDER`: Space separated list of slots to try in order (e.g. `A B`).
+- `BOOT_A_LEFT`: Remaining attempts for slot A.
+- `BOOT_B_LEFT`: Remaining attempts for slot B.
+
+If a variable is missing, lk2nd initializes it with a default maximum attempt count.
+
+### Slot Selection Flow
+1. Read environment at configured offset.
+2. Determine current slot: first slot in `BOOT_ORDER` with attempts left.
+3. Decrement its counter and save the environment (pre-boot).
+4. Publish a subdevice (`ab-slot`) starting at the slot offset and mount it.
+5. Load `/extlinux/extlinux.conf` from that filesystem.
+6. Select the label matching the slot.
+
+### Constructing extlinux.conf for A/B
+
+To keep identical `extlinux.conf` in both slots while still booting slot-specific content:
+1. Provide a `default <base>` line (optional but recommended).
+2. Define two labels suffixed with `_A` and `_B`:
+   - The `<base>` name can be reused as kernel naming anchor.
+   - lk2nd will force selection of `<default>_<slot>` if `default` is defined; otherwise it searches for any label ending in `_<slot>`.
+
+Minimal example (same file copied into both slot filesystems):
+```
+default linux
+label linux_A
+  linux /vmlinuz
+  initrd /initramfs
+  fdtdir /dtbs
+  append console=ttyMSM0,115200 root=/dev/slotA
+
+label linux_B
+  linux /vmlinuz
+  initrd /initramfs
+  fdtdir /dtbs
+  append console=ttyMSM0,115200 root=/dev/slotB
+```
+
+Notes:
+- Kernel/initrd/dtb paths can be identical if the payload inside each slot provides its own versions.
+- If a slot-specific label is missing, lk2nd aborts the boot for that slot (fails fast instead of silently using the wrong label).
+- If `default` is absent, lk2nd falls back to any label that ends with `_A` or `_B` depending on the active slot.
+
+### Userspace Responsibilities
+- After a successful boot into a slot, userspace should reset its boot counter (e.g. using `fw_setenv BOOT_A_LEFT <max>`).
+- During an update, deploy the new root filesystem at the inactive slot offset and adjust counters to try that slot first (`fw_setenv BOOT_ORDER "B A"`).
+
 ## lk2nd cmdline arguments
 
 lk2nd can read OS cmdline argument and make some decisions while booting it.
 
-> [!IMPORTANT]  
+> [!IMPORTANT]
 > lk2nd reads those values from the OS it boots, not from it's own cmdline.
 
 - `lk2nd.pass-simplefb(=...)` - Add simplefb node to the dtb.
