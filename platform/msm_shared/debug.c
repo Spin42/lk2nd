@@ -45,6 +45,13 @@
 #include <vibrator.h>
 #endif
 
+/*
+ * When non-zero, _dputc() suppresses output to UART (serial).
+ * Used by the serial menu to prevent background noise (fastboot thread,
+ * USB init, etc.) from corrupting the interactive display.
+ * Only UART output is suppressed; log buffer and fbcon continue normally.
+ */
+volatile int debug_uart_suppress = 0;
 
 static void write_dcc(char c)
 {
@@ -127,11 +134,33 @@ void debug_init(void)
 #endif
 }
 
+/*
+ * _serial_putc() - Write a character directly to the serial port.
+ *
+ * Bypasses the debug_uart_suppress flag so that the serial menu can
+ * continue to draw while background dprintf output is suppressed.
+ */
+void _serial_putc(char c)
+{
+#if WITH_DEBUG_UART
+	if (c == '\n')
+		uart_putc(0, '\r');
+	uart_putc(0, c);
+#elif WITH_DEBUG_DCC
+	if (c == '\n')
+		write_dcc('\r');
+	write_dcc(c);
+#endif
+}
+
 void _dputc(char c)
 {
 #if WITH_DEBUG_LOG_BUF
 	log_putc(c);
 #endif
+	/* Skip all interactive outputs when suppressed (menu active) */
+	if (debug_uart_suppress)
+		return;
 #if WITH_DEBUG_DCC
 	if (c == '\n') {
 		write_dcc('\r');
