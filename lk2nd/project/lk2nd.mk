@@ -34,6 +34,12 @@ ifeq ($(LK2ND_SERIAL_MENU),1)
 DEFINES += LK2ND_SERIAL_MENU=1
 endif
 
+# Verbose HSUSB init logging (set LK2ND_DEBUG_HSUSB=1 for debug builds)
+LK2ND_DEBUG_HSUSB ?= 0
+ifeq ($(LK2ND_DEBUG_HSUSB),1)
+DEFINES += LK2ND_DEBUG_HSUSB=1
+endif
+
 ifneq ($(ENABLE_FBCON_DISPLAY_MSG),1)
 MODULES += $(if $(filter $(MODULES), lk2nd/display), lk2nd/device/menu)
 endif

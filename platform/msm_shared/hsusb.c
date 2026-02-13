@@ -137,6 +137,16 @@ __WEAK void hsusb_clock_init(void)
 #define DBG(x...) dprintf(ALWAYS, x)
 #endif
 
+/*
+ * HSUSB_DBG: verbose init/start logging, silent by default.
+ * Build with LK2ND_DEBUG_HSUSB=1 to see these messages.
+ */
+#ifdef LK2ND_DEBUG_HSUSB
+#define HSUSB_DBG(x...) dprintf(ALWAYS, x)
+#else
+#define HSUSB_DBG(x...) dprintf(SPEW, x)
+#endif
+
 #define usb_status(a,b)
 
 struct usb_request {
@@ -709,28 +719,28 @@ void ulpi_write(unsigned val, unsigned reg)
 
 int udc_init(struct udc_device *dev)
 {
-	dprintf(ALWAYS, "HSUSB: udc_init() entry (dev=%p vid=%04x pid=%04x)\n", dev, dev ? dev->vendor_id : 0, dev ? dev->product_id : 0);
+	HSUSB_DBG("HSUSB: udc_init() entry (dev=%p vid=%04x pid=%04x)\n", dev, dev ? dev->vendor_id : 0, dev ? dev->product_id : 0);
 
 	hsusb_clock_init();
 
 	/* RESET */
 	writel(0x00080002, USB_USBCMD);
-	dprintf(ALWAYS, "HSUSB: issued controller reset\n");
+	HSUSB_DBG("HSUSB: issued controller reset\n");
 
 	thread_sleep(20);
 
 	while((readl(USB_USBCMD)&2));
-	dprintf(ALWAYS, "HSUSB: reset complete\n");
+	HSUSB_DBG("HSUSB: reset complete\n");
 
 	/* select ULPI phy */
 	writel(0x80000000, USB_PORTSC);
-	dprintf(ALWAYS, "HSUSB: ULPI phy selected (USB_PORTSC=%08x)\n", readl(USB_PORTSC));
+	HSUSB_DBG("HSUSB: ULPI phy selected (USB_PORTSC=%08x)\n", readl(USB_PORTSC));
 
 	/* Do any target specific intialization like GPIO settings,
 	 * LDO, PHY configuration etc. needed before USB port can be used.
 	 */
 	target_usb_init();
-	dprintf(ALWAYS, "HSUSB: target_usb_init() done\n");
+	HSUSB_DBG("HSUSB: target_usb_init() done\n");
 
 	/* USB_OTG_HS_AHB_BURST */
 	writel(0x0, USB_SBUSCFG);
@@ -740,28 +750,28 @@ int udc_init(struct udc_device *dev)
 	writel(0x08, USB_AHB_MODE);
 
 	epts = memalign(lcm(4096, CACHE_LINE), ROUNDUP(4096, CACHE_LINE));
-	dprintf(ALWAYS, "HSUSB: memalign queue heads result=%p\n", epts);
+	HSUSB_DBG("HSUSB: memalign queue heads result=%p\n", epts);
 	ASSERT(epts);
 
-	dprintf(ALWAYS, "HSUSB: allocated queue heads @%p\n", epts);
+	HSUSB_DBG("HSUSB: allocated queue heads @%p\n", epts);
 	memset(epts, 0, 32 * sizeof(struct ept_queue_head));
 	arch_clean_invalidate_cache_range((addr_t) epts,
 					  32 * sizeof(struct ept_queue_head));
 
 	writel((unsigned)PA((addr_t)epts), USB_ENDPOINTLISTADDR);
-	dprintf(ALWAYS, "HSUSB: endpoint list addr set to %08x\n", (unsigned)PA((addr_t)epts));
+	HSUSB_DBG("HSUSB: endpoint list addr set to %08x\n", (unsigned)PA((addr_t)epts));
 
 	/* select DEVICE mode */
 	writel(0x02, USB_USBMODE);
-	dprintf(ALWAYS, "HSUSB: USB mode DEV set (USBMODE=%08x)\n", readl(USB_USBMODE));
+	HSUSB_DBG("HSUSB: USB mode DEV set (USBMODE=%08x)\n", readl(USB_USBMODE));
 
 	writel(0xffffffff, USB_ENDPTFLUSH);
-	dprintf(ALWAYS, "HSUSB: endpoint flush issued\n");
+	HSUSB_DBG("HSUSB: endpoint flush issued\n");
 	thread_sleep(20);
 
 	ep0out = _udc_endpoint_alloc(0, 0, 64);
 	ep0in = _udc_endpoint_alloc(0, 1, 64);
-	dprintf(ALWAYS, "HSUSB: EP0 allocated in/out (%p/%p)\n", ep0in, ep0out);
+	HSUSB_DBG("HSUSB: EP0 allocated in/out (%p/%p)\n", ep0in, ep0out);
 	ep0req = udc_request_alloc();
 	ep0req->buf = memalign(CACHE_LINE, ROUNDUP(4096, CACHE_LINE));
 
@@ -774,10 +784,10 @@ int udc_init(struct udc_device *dev)
 		desc->data[3] = 0x04;
 		udc_descriptor_register(desc);
 	}
-	dprintf(ALWAYS, "HSUSB: descriptors prepared, exiting udc_init()\n");
+	HSUSB_DBG("HSUSB: descriptors prepared, exiting udc_init()\n");
 
 	the_device = dev;
-	dprintf(ALWAYS, "HSUSB: udc_init() success\n");
+	HSUSB_DBG("HSUSB: udc_init() success\n");
 	return 0;
 }
 
@@ -919,7 +929,7 @@ int udc_start(void)
 	unsigned size;
 	uint32_t val;
 
-	dprintf(ALWAYS, "udc_start()\n");
+	HSUSB_DBG("HSUSB: udc_start()\n");
 
 	if (!the_device) {
 		dprintf(CRITICAL, "udc cannot start before init\n");
