@@ -11,8 +11,7 @@ OBJS += \
 	$(LOCAL_DIR)/fastboot.o \
 	$(LOCAL_DIR)/recovery.o
 
-ifeq ($(UMS_ENABLE), 1)
-DEFINES += UMS_ENABLE=1
+ifeq ($(LK2ND_UMS), 1)
 OBJS += \
 	$(LOCAL_DIR)/ums.o
 endif

@@ -83,28 +83,28 @@ continuing with the usual workflow. This is useful for debugging and development
 This can help with debugging on devices with carkit uart.
 You need to switch the cable before starting linux to see all the logs.
 
-#### `MENU_COUNTDOWN_SECONDS=` - Boot menu countdown duration
+#### `LK2ND_MENU_TIMEOUT=` - Boot menu countdown duration
 
-Set the number of seconds to wait for keypress during boot countdown before continuing normal boot (default: 10). The countdown is displayed when `UMS_ENABLE=1` or other conditions trigger the boot menu.
+Set the number of seconds to wait for keypress during boot countdown before continuing normal boot (default: 10). The countdown is displayed when `LK2ND_UMS=1` or other conditions trigger the boot menu.
 
 ```
-$ make TOOLCHAIN_PREFIX=arm-none-eabi- MENU_COUNTDOWN_SECONDS=5 lk2nd-msmXXXX
+$ make TOOLCHAIN_PREFIX=arm-none-eabi- LK2ND_MENU_TIMEOUT=5 lk2nd-msmXXXX
 ```
 
-#### `UMS_ENABLE=` - Enable USB Mass Storage mode
+#### `LK2ND_UMS=` - Enable USB Mass Storage mode
 
 Set to 1 to enable USB Mass Storage support. When enabled, lk2nd displays a countdown during early boot. Press any key during the countdown to open the fastboot menu on the serial console, where you can select "USB Storage" to expose a partition as a USB mass storage device for direct access from a PC.
 
 ```
-$ make TOOLCHAIN_PREFIX=arm-none-eabi- UMS_ENABLE=1 lk2nd-msmXXXX
+$ make TOOLCHAIN_PREFIX=arm-none-eabi- LK2ND_UMS=1 lk2nd-msmXXXX
 ```
 
-#### `UMS_PARTITION=` - Partition to export in UMS mode
+#### `LK2ND_UMS_PARTITION=` - Partition to export in UMS mode
 
 Set the partition name to expose when entering USB Mass Storage mode via the menu (default: `userdata`). Can be any valid partition name like `system`, `userdata`, `cache`, etc.
 
 ```
-$ make TOOLCHAIN_PREFIX=arm-none-eabi- UMS_ENABLE=1 UMS_PARTITION=system lk2nd-msmXXXX
+$ make TOOLCHAIN_PREFIX=arm-none-eabi- LK2ND_UMS=1 LK2ND_UMS_PARTITION=system lk2nd-msmXXXX
 ```
 
 #### `LK2ND_SERIAL_MENU=` - Force menu on serial console
@@ -123,9 +123,9 @@ For headless devices (no display) with UMS support:
 $ make TOOLCHAIN_PREFIX=arm-none-eabi- \
      LK2ND_SKIP_GDSC_CHECK=1 \
      LK2ND_SERIAL_MENU=1 \
-     UMS_ENABLE=1 \
-     MENU_COUNTDOWN_SECONDS=10 \
-     UMS_PARTITION=userdata \
+     LK2ND_UMS=1 \
+     LK2ND_MENU_TIMEOUT=10 \
+     LK2ND_UMS_PARTITION=userdata \
      lk2nd-msmXXXX
 ```
 

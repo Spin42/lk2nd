@@ -26,10 +26,6 @@ extern void cmd_continue(const char *arg, void *data, unsigned sz);
 extern int dgetc(char *c, bool wait);
 
 /* Configuration */
-#ifndef MENU_COUNTDOWN_SECONDS
-#define MENU_COUNTDOWN_SECONDS 10
-#endif
-
 #define FONT_WIDTH	(5+1)
 #define FONT_HEIGHT	12
 #define MIN_LINE	40
@@ -199,7 +195,7 @@ static void opt_bootloader(void) { reboot_device(FASTBOOT_MODE); }
 static void opt_edl(void)        { reboot_device(EMERGENCY_DLOAD); }
 static void opt_shutdown(void)   { shutdown_device(); }
 
-#ifdef UMS_ENABLE
+#ifdef LK2ND_UMS
 extern int ums_enter_mode(const char *partition_name);
 static void opt_ums(void)
 {
@@ -207,7 +203,7 @@ static void opt_ums(void)
 	debug_uart_suppress = 0;
 
 	dprintf(INFO, "Entering USB Mass Storage mode (partition='%s')\n",
-		xstr(UMS_PARTITION));
+		xstr(LK2ND_UMS_PARTITION));
 
 	/* Ensure block devices are initialized before UMS attempts a mount */
 	extern void lk2nd_bdev_init(void);
@@ -217,7 +213,7 @@ static void opt_ums(void)
 		bdev_init_done = true;
 	}
 
-	int ret = ums_enter_mode(xstr(UMS_PARTITION));
+	int ret = ums_enter_mode(xstr(LK2ND_UMS_PARTITION));
 	if (ret == 0) {
 		dprintf(INFO, "UMS mode ended, rebooting\n");
 		reboot_device(0);
@@ -237,7 +233,7 @@ static struct {
 	{ "Continue",    WHITE,  opt_continue },
 	{ "Recovery",    ORANGE, opt_recovery },
 	{ "Bootloader",  ORANGE, opt_bootloader },
-#ifdef UMS_ENABLE
+#ifdef LK2ND_UMS
 	{ "USB Storage", YELLOW, opt_ums },
 #endif
 	{ "EDL",         RED,    opt_edl },
@@ -761,7 +757,7 @@ nav_down:
  */
 int boot_menu_countdown_check(void)
 {
-	int countdown = MENU_COUNTDOWN_SECONDS;
+	int countdown = LK2ND_MENU_TIMEOUT;
 	char c;
 	bool triggered = false;
 

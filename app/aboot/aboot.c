@@ -95,7 +95,7 @@
 #include <menu_keys_detect.h>
 #include <display_menu.h>
 #include "fastboot_test.h"
-#ifdef UMS_ENABLE
+#ifdef LK2ND_UMS
 #include "ums.h"
 #endif
 
@@ -5586,7 +5586,7 @@ void aboot_init(const struct app_descriptor *app)
 	if (is_user_force_reset())
 		goto normal_boot;
 
-#ifdef UMS_ENABLE
+#ifdef LK2ND_UMS
 	/* Show boot menu countdown - allows entering fastboot menu via serial console */
 	if (boot_menu_countdown_check()) {
 		boot_into_fastboot = true;
