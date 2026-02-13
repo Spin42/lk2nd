@@ -204,6 +204,9 @@ static void opt_ums(void)
 
 	dprintf(INFO, "Entering USB Mass Storage mode (partition='%s')\n",
 		xstr(LK2ND_UMS_PARTITION));
+	/* Note: xstr() stringifies the token, so LK2ND_UMS_PARTITION=userdata
+	 * becomes the string literal "userdata". The makefile must NOT wrap
+	 * the value in quotes or they will be embedded in the string. */
 
 	/* Ensure block devices are initialized before UMS attempts a mount */
 	extern void lk2nd_bdev_init(void);
