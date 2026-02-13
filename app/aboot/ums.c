@@ -58,8 +58,20 @@ static event_t ums_online;
 static event_t ums_txn_done;
 static bool ums_active = false;
 
-/* Static CBW buffer - MUST NOT be on stack as USB DMA accesses it asynchronously */
+/* Controller-specific transfer limit */
+static bool ums_is_dwc = false;
+static unsigned ums_max_usb_xfer = UMS_HSUSB_MAX_XFER;
+
+/* Actual transfer buffer size (set at init time) */
+static unsigned ums_buffer_size = 0;
+
+/* Static CBW/CSW buffers - MUST NOT be on stack as USB DMA accesses them */
 static struct cbw ums_cbw_buffer __attribute__((aligned(CACHE_LINE)));
+static struct csw ums_csw_buffer __attribute__((aligned(CACHE_LINE)));
+
+/* Static buffer for small SCSI responses (sense, inquiry, capacity, mode) */
+#define UMS_SMALL_BUF_SIZE 256
+static uint8_t ums_small_buf[UMS_SMALL_BUF_SIZE] __attribute__((aligned(CACHE_LINE)));
 
 /* Controller abstraction (hsusb vs dwc), modeled after fastboot */
 typedef struct {
@@ -76,6 +88,9 @@ typedef struct {
 } ums_usb_if_t;
 
 static ums_usb_if_t usb_if;
+
+/* Forward declaration - ums_notify is defined below but used in gadget init */
+static void ums_notify(struct udc_gadget *gadget, unsigned event);
 
 /* USB device and gadget descriptors */
 static struct udc_device ums_udc_device = {
@@ -108,6 +123,87 @@ static void ums_req_complete(struct udc_request *req, unsigned actual, int statu
     event_signal(&ums_txn_done, 0);
 }
 
+/*
+ * ums_usb_write - Send data to host, chunked to controller limits.
+ * Mirrors fastboot's hsusb_usb_write() / usb30_usb_write() pattern.
+ * @buf: virtual address of data buffer (must be cache-line aligned for DMA)
+ * @len: number of bytes to send
+ * Returns bytes sent, or -1 on error.
+ */
+static int ums_usb_write(void *buf, unsigned len)
+{
+    unsigned char *ptr = buf;
+    unsigned xfer;
+    int count = 0;
+
+    /* Flush entire buffer to main memory before DMA */
+    arch_clean_invalidate_cache_range((addr_t)buf, ROUNDUP(len, CACHE_LINE));
+
+    while (len > 0) {
+        xfer = (len > ums_max_usb_xfer) ? ums_max_usb_xfer : len;
+
+        ums_req_in->buf = (void *)PA((addr_t)ptr);
+        ums_req_in->length = xfer;
+        ums_req_in->complete = ums_req_complete;
+
+        if (usb_if.udc_request_queue(ums_endpoints[0], ums_req_in) < 0) {
+            dprintf(CRITICAL, "UMS: usb_write queue failed\n");
+            return -1;
+        }
+        event_wait(&ums_txn_done);
+
+        count += ums_req_in->length;
+        ptr += ums_req_in->length;
+        len -= ums_req_in->length;
+
+        /* Short transfer means host stopped early */
+        if (ums_req_in->length != xfer)
+            break;
+    }
+
+    return count;
+}
+
+/*
+ * ums_usb_read - Receive data from host, chunked to controller limits.
+ * @buf: virtual address of receive buffer (must be cache-line aligned for DMA)
+ * @len: number of bytes to receive
+ * Returns bytes received, or -1 on error.
+ */
+static int ums_usb_read(void *buf, unsigned len)
+{
+    unsigned char *ptr = buf;
+    unsigned xfer;
+    int count = 0;
+
+    while (len > 0) {
+        xfer = (len > ums_max_usb_xfer) ? ums_max_usb_xfer : len;
+
+        ums_req_out->buf = (void *)PA((addr_t)ptr);
+        ums_req_out->length = xfer;
+        ums_req_out->complete = ums_req_complete;
+
+        if (usb_if.udc_request_queue(ums_endpoints[1], ums_req_out) < 0) {
+            dprintf(CRITICAL, "UMS: usb_read queue failed\n");
+            return -1;
+        }
+        event_wait(&ums_txn_done);
+
+        count += ums_req_out->length;
+        ptr += ums_req_out->length;
+        len -= ums_req_out->length;
+
+        /* Short transfer */
+        if (ums_req_out->length != xfer)
+            break;
+    }
+
+    /* Invalidate cache so CPU sees DMA-written data */
+    arch_invalidate_cache_range((addr_t)buf, ROUNDUP(count, CACHE_LINE));
+
+    return count;
+}
+
 /* USB gadget event notification */
 static void ums_notify(struct udc_gadget *gadget, unsigned event)
 {
@@ -135,19 +231,12 @@ static void ums_set_sense(uint8_t key, uint8_t asc, uint8_t ascq)
 /* Send Command Status Wrapper */
 static void ums_send_csw(uint32_t tag, uint32_t residue, uint8_t status)
 {
-    struct csw csw;
+    ums_csw_buffer.signature = CSW_SIGNATURE;
+    ums_csw_buffer.tag = tag;
+    ums_csw_buffer.data_residue = residue;
+    ums_csw_buffer.status = status;
 
-    csw.signature = CSW_SIGNATURE;
-    csw.tag = tag;
-    csw.data_residue = residue;
-    csw.status = status;
-
-    ums_req_in->buf = &csw;
-    ums_req_in->length = sizeof(csw);
-    ums_req_in->complete = ums_req_complete;
-
-    usb_if.udc_request_queue(ums_endpoints[0], ums_req_in);
-    event_wait(&ums_txn_done);
+    ums_usb_write(&ums_csw_buffer, sizeof(ums_csw_buffer));
 }
 
 /* SCSI TEST UNIT READY command */
@@ -167,23 +256,19 @@ static int ums_scsi_test_unit_ready(struct cbw *cbw)
 /* SCSI REQUEST SENSE command */
 static int ums_scsi_request_sense(struct cbw *cbw)
 {
-    uint8_t sense_data[18] = {0};
+    unsigned len;
 
     dprintf(SPEW, "UMS: REQUEST SENSE\n");
 
-    sense_data[0] = 0x70;  /* Response Code */
-    sense_data[2] = g_ums_device.sense_key;
-    sense_data[7] = 10;    /* Additional Sense Length */
-    sense_data[12] = g_ums_device.asc;
-    sense_data[13] = g_ums_device.ascq;
+    memset(ums_small_buf, 0, 18);
+    ums_small_buf[0] = 0x70;  /* Response Code */
+    ums_small_buf[2] = g_ums_device.sense_key;
+    ums_small_buf[7] = 10;    /* Additional Sense Length */
+    ums_small_buf[12] = g_ums_device.asc;
+    ums_small_buf[13] = g_ums_device.ascq;
 
-    /* Send sense data */
-    ums_req_in->buf = sense_data;
-    ums_req_in->length = MIN(cbw->data_transfer_length, sizeof(sense_data));
-    ums_req_in->complete = ums_req_complete;
-
-    usb_if.udc_request_queue(ums_endpoints[0], ums_req_in);
-    event_wait(&ums_txn_done);
+    len = MIN(cbw->data_transfer_length, 18);
+    ums_usb_write(ums_small_buf, len);
 
     /* Clear sense after reporting */
     ums_set_sense(SCSI_SENSE_NO_SENSE, 0, 0);
@@ -194,28 +279,25 @@ static int ums_scsi_request_sense(struct cbw *cbw)
 /* SCSI INQUIRY command */
 static int ums_scsi_inquiry(struct cbw *cbw)
 {
-    struct scsi_inquiry_data inquiry = {0};
+    struct scsi_inquiry_data *inquiry = (struct scsi_inquiry_data *)ums_small_buf;
+    unsigned len;
 
     dprintf(SPEW, "UMS: INQUIRY\n");
 
-    inquiry.peripheral_device_type = 0;  /* Direct access block device */
-    inquiry.peripheral_qualifier = 0;
-    inquiry.rmb = 1;  /* Removable medium */
-    inquiry.version = 4;  /* SPC-2 */
-    inquiry.response_data_format = 2;
-    inquiry.additional_length = sizeof(inquiry) - 5;
+    memset(inquiry, 0, sizeof(*inquiry));
+    inquiry->peripheral_device_type = 0;  /* Direct access block device */
+    inquiry->peripheral_qualifier = 0;
+    inquiry->rmb = 1;  /* Removable medium */
+    inquiry->version = 4;  /* SPC-2 */
+    inquiry->response_data_format = 2;
+    inquiry->additional_length = sizeof(*inquiry) - 5;
 
-    memcpy(inquiry.vendor_id, "lk2nd   ", 8);
-    memcpy(inquiry.product_id, "Mass Storage    ", 16);
-    memcpy(inquiry.product_revision, "1.0 ", 4);
+    memcpy(inquiry->vendor_id, "lk2nd   ", 8);
+    memcpy(inquiry->product_id, "Mass Storage    ", 16);
+    memcpy(inquiry->product_revision, "1.0 ", 4);
 
-    /* Send inquiry data */
-    ums_req_in->buf = &inquiry;
-    ums_req_in->length = MIN(cbw->data_transfer_length, sizeof(inquiry));
-    ums_req_in->complete = ums_req_complete;
-
-    usb_if.udc_request_queue(ums_endpoints[0], ums_req_in);
-    event_wait(&ums_txn_done);
+    len = MIN(cbw->data_transfer_length, sizeof(*inquiry));
+    ums_usb_write(ums_small_buf, len);
 
     return 0;
 }
@@ -223,7 +305,9 @@ static int ums_scsi_inquiry(struct cbw *cbw)
 /* SCSI READ CAPACITY command */
 static int ums_scsi_read_capacity(struct cbw *cbw)
 {
-    struct scsi_read_capacity_data capacity = {0};
+    struct scsi_read_capacity_data *capacity =
+        (struct scsi_read_capacity_data *)ums_small_buf;
+    unsigned len;
 
     dprintf(SPEW, "UMS: READ CAPACITY\n");
 
@@ -232,26 +316,23 @@ static int ums_scsi_read_capacity(struct cbw *cbw)
         return -1;
     }
 
+    memset(capacity, 0, sizeof(*capacity));
     /* Convert to big-endian */
-    capacity.last_logical_block = __builtin_bswap32(g_ums_device.block_count - 1);
-    capacity.logical_block_length = __builtin_bswap32(g_ums_device.block_size);
+    capacity->last_logical_block = __builtin_bswap32(g_ums_device.block_count - 1);
+    capacity->logical_block_length = __builtin_bswap32(g_ums_device.block_size);
 
-    /* Send capacity data */
-    ums_req_in->buf = &capacity;
-    ums_req_in->length = MIN(cbw->data_transfer_length, sizeof(capacity));
-    ums_req_in->complete = ums_req_complete;
-
-    usb_if.udc_request_queue(ums_endpoints[0], ums_req_in);
-    event_wait(&ums_txn_done);
+    len = MIN(cbw->data_transfer_length, sizeof(*capacity));
+    ums_usb_write(ums_small_buf, len);
 
     return 0;
 }
 
-/* SCSI READ 10 command */
+/* SCSI READ 10 command - chunked for large transfers */
 static int ums_scsi_read_10(struct cbw *cbw)
 {
-    uint32_t lba, transfer_length;
+    uint32_t lba, transfer_length, remaining, chunk_blocks;
     uint64_t offset;
+    unsigned chunk_bytes;
     int ret;
 
     if (!g_ums_device.is_mounted || !g_ums_device.bio_dev) {
@@ -271,33 +352,44 @@ static int ums_scsi_read_10(struct cbw *cbw)
         return -1;
     }
 
-    offset = (uint64_t)lba * g_ums_device.block_size;
+    /* Max blocks that fit in our transfer buffer */
+    uint32_t max_blocks_per_chunk = ums_buffer_size / g_ums_device.block_size;
 
-    /* Read data from partition */
-    ret = bio_read(g_ums_device.bio_dev, g_ums_device.transfer_buffer,
-                   offset, transfer_length * g_ums_device.block_size);
-    if (ret < 0) {
-        dprintf(CRITICAL, "UMS: bio_read failed: %d\n", ret);
-        ums_set_sense(SCSI_SENSE_MEDIUM_ERROR, 0, 0);
-        return -1;
+    remaining = transfer_length;
+    while (remaining > 0) {
+        chunk_blocks = (remaining > max_blocks_per_chunk) ? max_blocks_per_chunk : remaining;
+        chunk_bytes = chunk_blocks * g_ums_device.block_size;
+        offset = (uint64_t)lba * g_ums_device.block_size;
+
+        /* Read from storage into transfer buffer */
+        ret = bio_read(g_ums_device.bio_dev, g_ums_device.transfer_buffer,
+                       offset, chunk_bytes);
+        if (ret < 0) {
+            dprintf(CRITICAL, "UMS: bio_read failed at LBA %u: %d\n", lba, ret);
+            ums_set_sense(SCSI_SENSE_MEDIUM_ERROR, 0, 0);
+            return -1;
+        }
+
+        /* Send chunk to host via chunked USB write */
+        ret = ums_usb_write(g_ums_device.transfer_buffer, chunk_bytes);
+        if (ret < 0) {
+            dprintf(CRITICAL, "UMS: usb_write failed at LBA %u\n", lba);
+            return -1;
+        }
+
+        lba += chunk_blocks;
+        remaining -= chunk_blocks;
     }
-
-    /* Send data to host */
-    ums_req_in->buf = g_ums_device.transfer_buffer;
-    ums_req_in->length = transfer_length * g_ums_device.block_size;
-    ums_req_in->complete = ums_req_complete;
-
-    usb_if.udc_request_queue(ums_endpoints[0], ums_req_in);
-    event_wait(&ums_txn_done);
 
     return 0;
 }
 
-/* SCSI WRITE 10 command */
+/* SCSI WRITE 10 command - chunked for large transfers */
 static int ums_scsi_write_10(struct cbw *cbw)
 {
-    uint32_t lba, transfer_length;
+    uint32_t lba, transfer_length, remaining, chunk_blocks;
     uint64_t offset;
+    unsigned chunk_bytes;
     int ret;
 
     if (!g_ums_device.is_mounted || !g_ums_device.bio_dev) {
@@ -322,27 +414,33 @@ static int ums_scsi_write_10(struct cbw *cbw)
         return -1;
     }
 
-    /* Receive data from host */
-    ums_req_out->buf = g_ums_device.transfer_buffer;
-    ums_req_out->length = transfer_length * g_ums_device.block_size;
-    ums_req_out->complete = ums_req_complete;
+    /* Max blocks that fit in our transfer buffer */
+    uint32_t max_blocks_per_chunk = ums_buffer_size / g_ums_device.block_size;
 
-    usb_if.udc_request_queue(ums_endpoints[1], ums_req_out);
-    event_wait(&ums_txn_done);
+    remaining = transfer_length;
+    while (remaining > 0) {
+        chunk_blocks = (remaining > max_blocks_per_chunk) ? max_blocks_per_chunk : remaining;
+        chunk_bytes = chunk_blocks * g_ums_device.block_size;
 
-    /* Invalidate cache to ensure CPU reads fresh data written by USB DMA */
-    arch_invalidate_cache_range((addr_t)g_ums_device.transfer_buffer,
-                                ROUNDUP(transfer_length * g_ums_device.block_size, CACHE_LINE));
+        /* Receive chunk from host via chunked USB read */
+        ret = ums_usb_read(g_ums_device.transfer_buffer, chunk_bytes);
+        if (ret < 0) {
+            dprintf(CRITICAL, "UMS: usb_read failed at LBA %u\n", lba);
+            return -1;
+        }
 
-    offset = (uint64_t)lba * g_ums_device.block_size;
+        /* Write to storage */
+        offset = (uint64_t)lba * g_ums_device.block_size;
+        ret = bio_write(g_ums_device.bio_dev, g_ums_device.transfer_buffer,
+                        offset, chunk_bytes);
+        if (ret < 0) {
+            dprintf(CRITICAL, "UMS: bio_write failed at LBA %u: %d\n", lba, ret);
+            ums_set_sense(SCSI_SENSE_MEDIUM_ERROR, 0, 0);
+            return -1;
+        }
 
-    /* Write data to partition */
-    ret = bio_write(g_ums_device.bio_dev, g_ums_device.transfer_buffer,
-                    offset, transfer_length * g_ums_device.block_size);
-    if (ret < 0) {
-        dprintf(CRITICAL, "UMS: bio_write failed: %d\n", ret);
-        ums_set_sense(SCSI_SENSE_MEDIUM_ERROR, 0, 0);
-        return -1;
+        lba += chunk_blocks;
+        remaining -= chunk_blocks;
     }
 
     return 0;
@@ -351,22 +449,18 @@ static int ums_scsi_write_10(struct cbw *cbw)
 /* SCSI MODE SENSE 6 command */
 static int ums_scsi_mode_sense_6(struct cbw *cbw)
 {
-    uint8_t mode_data[4] = {0};
+    unsigned len;
 
     dprintf(SPEW, "UMS: MODE SENSE 6\n");
 
-    mode_data[0] = 3;  /* Mode data length */
-    mode_data[1] = 0;  /* Medium type */
-    mode_data[2] = g_ums_device.is_read_only ? 0x80 : 0x00;  /* Device-specific parameter */
-    mode_data[3] = 0;  /* Block descriptor length */
+    memset(ums_small_buf, 0, 4);
+    ums_small_buf[0] = 3;  /* Mode data length */
+    ums_small_buf[1] = 0;  /* Medium type */
+    ums_small_buf[2] = g_ums_device.is_read_only ? 0x80 : 0x00;  /* Device-specific parameter */
+    ums_small_buf[3] = 0;  /* Block descriptor length */
 
-    /* Send mode data */
-    ums_req_in->buf = mode_data;
-    ums_req_in->length = MIN(cbw->data_transfer_length, sizeof(mode_data));
-    ums_req_in->complete = ums_req_complete;
-
-    usb_if.udc_request_queue(ums_endpoints[0], ums_req_in);
-    event_wait(&ums_txn_done);
+    len = MIN(cbw->data_transfer_length, 4);
+    ums_usb_write(ums_small_buf, len);
 
     return 0;
 }
@@ -467,9 +561,11 @@ static int ums_thread(void *arg)
     while (ums_active) {
         /* Clear the CBW buffer before receiving new data */
         memset(&ums_cbw_buffer, 0, sizeof(ums_cbw_buffer));
+        arch_clean_invalidate_cache_range((addr_t)&ums_cbw_buffer,
+                                          ROUNDUP(sizeof(ums_cbw_buffer), CACHE_LINE));
 
-        /* Receive CBW - using static buffer instead of stack to avoid DMA corruption */
-        ums_req_out->buf = &ums_cbw_buffer;
+        /* Receive CBW - using static buffer with physical address for DMA */
+        ums_req_out->buf = (void *)PA((addr_t)&ums_cbw_buffer);
         ums_req_out->length = sizeof(ums_cbw_buffer);
         ums_req_out->complete = ums_req_complete;
 
@@ -575,28 +671,51 @@ void ums_unmount_partition(void)
 /* Initialize UMS */
 int ums_init(void)
 {
-    /* Allocate transfer buffer */
-    g_ums_device.transfer_buffer = memalign(4096, UMS_BUFFER_SIZE);
-    if (!g_ums_device.transfer_buffer) {
-        dprintf(CRITICAL, "UMS: Failed to allocate transfer buffer\n");
-        return -1;
+    unsigned maxpkt;
+
+    /* Detect controller type and set transfer parameters */
+    ums_is_dwc = !strcmp(target_usb_controller(), "dwc");
+    if (ums_is_dwc) {
+        ums_max_usb_xfer = UMS_DWC_MAX_XFER;
+        maxpkt = 1024;  /* USB3 SuperSpeed */
+    } else {
+        ums_max_usb_xfer = UMS_HSUSB_MAX_XFER;
+        maxpkt = 512;   /* USB2 High Speed */
     }
+
+    /*
+     * Use the scratch region for the transfer buffer (same region fastboot uses).
+     * This gives us a large, page-aligned, DMA-safe buffer without malloc.
+     * Cap at half the scratch region to leave room for other subsystems.
+     */
+    void *scratch = target_get_scratch_address();
+    unsigned scratch_max = target_get_max_flash_size();
+
+    ums_buffer_size = UMS_BUFFER_SIZE_DEFAULT;
+    if (ums_buffer_size > scratch_max / 2)
+        ums_buffer_size = scratch_max / 2;
+    /* Align down to block size (512) */
+    ums_buffer_size &= ~(512U - 1);
+
+    g_ums_device.transfer_buffer = scratch;
+    dprintf(INFO, "UMS: Transfer buffer @%p, size %u KiB (scratch region)\n",
+            scratch, ums_buffer_size / 1024);
 
     /* Initialize events */
     event_init(&ums_online, false, EVENT_FLAG_AUTOUNSIGNAL);
     event_init(&ums_txn_done, false, EVENT_FLAG_AUTOUNSIGNAL);
 
     /* Select controller implementation (dwc vs hsusb) */
-    if (!strcmp(target_usb_controller(), "dwc")) {
+    if (ums_is_dwc) {
 #ifdef USB30_SUPPORT
         ums_udc_device.t_usb_if = target_usb30_init();
         usb_if.udc_init            = usb30_udc_init;
         usb_if.udc_register_gadget = usb30_udc_register_gadget;
         usb_if.udc_start           = usb30_udc_start;
         usb_if.udc_stop            = usb30_udc_stop;
-    usb_if.udc_endpoint_alloc  = usb30_udc_endpoint_alloc;
-    /* No usb30_udc_endpoint_free in header; leave free as NULL */
-    usb_if.udc_endpoint_free   = NULL;
+        usb_if.udc_endpoint_alloc  = usb30_udc_endpoint_alloc;
+        /* No usb30_udc_endpoint_free in header; leave free as NULL */
+        usb_if.udc_endpoint_free   = NULL;
         usb_if.udc_request_alloc   = usb30_udc_request_alloc;
         usb_if.udc_request_free    = usb30_udc_request_free;
         usb_if.udc_request_queue   = usb30_udc_request_queue;
@@ -617,7 +736,8 @@ int ums_init(void)
     }
 
     /* Initialize UDC */
-    dprintf(INFO, "UMS: Initializing USB controller (%s)\n", target_usb_controller());
+    dprintf(INFO, "UMS: Initializing USB controller (%s), maxpkt=%u, max_xfer=%u KiB\n",
+            target_usb_controller(), maxpkt, ums_max_usb_xfer / 1024);
     int ret = usb_if.udc_init(&ums_udc_device);
     if (ret) {
         dprintf(CRITICAL, "UMS: Failed to initialize UDC: %d\n", ret);
@@ -625,8 +745,8 @@ int ums_init(void)
     }
 
     /* Allocate endpoints - MUST happen after udc_init() */
-    ums_endpoints[0] = usb_if.udc_endpoint_alloc(UDC_TYPE_BULK_IN, 512);
-    ums_endpoints[1] = usb_if.udc_endpoint_alloc(UDC_TYPE_BULK_OUT, 512);
+    ums_endpoints[0] = usb_if.udc_endpoint_alloc(UDC_TYPE_BULK_IN, maxpkt);
+    ums_endpoints[1] = usb_if.udc_endpoint_alloc(UDC_TYPE_BULK_OUT, maxpkt);
     if (!ums_endpoints[0] || !ums_endpoints[1]) {
         dprintf(CRITICAL, "UMS: Failed to allocate endpoints\n");
         return -1;
@@ -747,11 +867,8 @@ void ums_exit_mode(void)
     /* Unmount partition */
     ums_unmount_partition();
 
-    /* Free resources */
-    if (g_ums_device.transfer_buffer) {
-        free(g_ums_device.transfer_buffer);
-        g_ums_device.transfer_buffer = NULL;
-    }
+    /* Release resources (transfer buffer is scratch region, not freed) */
+    g_ums_device.transfer_buffer = NULL;
 
     if (ums_req_in) {
         usb_if.udc_request_free(ums_req_in);

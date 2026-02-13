@@ -77,8 +77,23 @@ struct cbw;
 #define SCSI_ASC_MEDIUM_NOT_PRESENT 0x3A
 
 /* Configuration */
-#define UMS_BUFFER_SIZE         (128 * 1024)  /* 128KB buffer for transfers (was 64KB - too small for some hosts) */
 #define UMS_MAX_PARTITION_NAME  32
+
+/*
+ * Transfer buffer sizing.
+ * UMS uses a portion of the scratch region (same area fastboot uses).
+ * The default is 1 MiB; the actual size is capped at half the scratch
+ * region so that other subsystems still have room.
+ */
+#define UMS_BUFFER_SIZE_DEFAULT (1 * 1024 * 1024)
+
+/*
+ * USB controller transfer limits (must match HSUSB / DWC drivers).
+ * HSUSB: 2 TDs x 16 KiB = 32 KiB per udc_request_queue() call.
+ * DWC:   single TRB can do ~16 MiB.
+ */
+#define UMS_HSUSB_MAX_XFER      (32 * 1024)
+#define UMS_DWC_MAX_XFER         (16 * 1024 * 1024)
 
 /* Command Block Wrapper (CBW) */
 struct cbw {
@@ -162,27 +177,11 @@ struct ums_device {
     uint8_t ascq;
 };
 
-/* Function prototypes */
+/* Public API */
 int ums_enter_mode(const char *partition_name);
 void ums_exit_mode(void);
 int ums_init(void);
 int ums_mount_partition(const char *partition_name);
 void ums_unmount_partition(void);
-
-/* Internal functions */
-static void ums_notify(struct udc_gadget *gadget, unsigned event);
-static int ums_handle_cbw(struct cbw *cbw);
-static void ums_send_csw(uint32_t tag, uint32_t residue, uint8_t status);
-static int ums_handle_scsi_command(struct cbw *cbw);
-static void ums_set_sense(uint8_t key, uint8_t asc, uint8_t ascq);
-
-/* SCSI command handlers */
-static int ums_scsi_test_unit_ready(struct cbw *cbw);
-static int ums_scsi_request_sense(struct cbw *cbw);
-static int ums_scsi_inquiry(struct cbw *cbw);
-static int ums_scsi_read_capacity(struct cbw *cbw);
-static int ums_scsi_read_10(struct cbw *cbw);
-static int ums_scsi_write_10(struct cbw *cbw);
-static int ums_scsi_mode_sense_6(struct cbw *cbw);
 
 #endif /* __APP_UMS_H */
