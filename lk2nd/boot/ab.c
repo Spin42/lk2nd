@@ -166,16 +166,12 @@ void lk2nd_boot_ab_init(const char *partition, uint64_t offset, size_t size)
 
 /*
  * Get current boot slot (A or B)
- * Returns the slot that should be booted based on BOOT_ORDER and remaining attempts
- * Returns 'A' if A/B boot is not initialized (standard boot mode)
+ * Returns '\0' if A/B boot is not initialized (standard extlinux mode)
  */
 char lk2nd_boot_ab_get_slot(void)
 {
-	if (!ab_state.initialized) {
-		/* A/B not configured - return 'A' which won't match any _A suffix
-		 * allowing standard extlinux labels to work normally */
-		return 'A';
-	}
+	if (!ab_state.initialized)
+		return '\0';
 
 	return ab_state.current_slot;
 }
@@ -238,7 +234,28 @@ void lk2nd_boot_ab_set_offsets(uint64_t offset_a, uint64_t offset_b)
 		ab_state.boot_offset_a, ab_state.boot_offset_b);
 }
 
-/* No partition names anymore: only offsets per slot are used */
+/*
+ * Move to the next slot in BOOT_ORDER when the current one mounted but had
+ * no bootable kernel. This doesn't touch the boot counter (pre_boot handles
+ * that); it just picks the next slot so we can retry before giving up.
+ * Returns false when there's nothing left to try.
+ */
+bool lk2nd_boot_ab_advance_slot(void)
+{
+	char next;
+
+	if (!ab_state.initialized)
+		return false;
+
+	next = uboot_env_get_next_slot(&ab_state.env, ab_state.current_slot);
+	if (next == '\0')
+		return false;
+
+	dprintf(INFO, "A/B boot: Slot %c did not boot, advancing to slot %c\n",
+		ab_state.current_slot, next);
+	ab_state.current_slot = next;
+	return true;
+}
 
 /*
  * Get the boot partition offset for the current slot

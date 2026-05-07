@@ -59,48 +59,62 @@ static void lk2nd_scan_devices(void)
 			dprintf(INFO, " (no offset)\n");
 	}
 
-	/* If A/B is configured, prefer direct mount of the base device or its subdevice */
+	/* A/B configured: boot straight from the env partition, skip the scan */
 	if (base_device) {
 		if (target_offset > 0) {
-			/* Create a subdevice starting at the specified offset */
-			bdev_t *parent_bdev = bio_open(base_device);
-			if (parent_bdev) {
-			size_t block_size = parent_bdev->block_size;
-			bnum_t start_block = target_offset / block_size;
-			/* Use remaining size from offset to end of partition */
-			size_t subdev_len = parent_bdev->block_count - start_block;
+			/*
+			 * Try each slot until one boots. lk2nd_try_extlinux()
+			 * only returns if no kernel was launched, so on return we
+			 * unmount and move on to the next slot.
+			 */
+			do {
+				char slot = lk2nd_boot_ab_get_slot();
+				target_offset = lk2nd_boot_ab_get_offset();
 
-				snprintf(subdev_name, sizeof(subdev_name), "ab-slot");
+				bdev_t *parent_bdev = bio_open(base_device);
+				if (!parent_bdev) {
+					dprintf(CRITICAL, "boot: Failed to open base device '%s'\n", base_device);
+					break;
+				}
 
-				ret = bio_publish_subdevice(base_device, subdev_name, start_block, subdev_len);
+				size_t block_size = parent_bdev->block_size;
+				bnum_t start_block = target_offset / block_size;
+				size_t subdev_len = parent_bdev->block_count - start_block;
 				bio_close(parent_bdev);
 
-			if (ret == 0) {
-				dprintf(INFO, "boot: Created subdevice '%s' at block %u (0x%llx bytes)\n",
-					subdev_name, (unsigned)start_block, target_offset);
+				/* Per-slot name so retries don't clash */
+				snprintf(subdev_name, sizeof(subdev_name), "ab-slot-%c", slot);
 
-					/* Mount directly and try to boot */
-					snprintf(mountpoint, sizeof(mountpoint), "/%s", subdev_name);
-					ret = fs_mount(mountpoint, "ext2", subdev_name);
-					if (ret >= 0) {
-						if (DEBUGLEVEL >= SPEW) {
-							dprintf(SPEW, "Scanning %s ...\n", subdev_name);
-							dprintf(SPEW, "%s\n", mountpoint);
-							lk2nd_print_file_tree(mountpoint, " ");
-						}
-						lk2nd_try_extlinux(mountpoint);
-						return;
-					} else {
-						dprintf(CRITICAL, "boot: Failed to mount subdevice '%s'\n", subdev_name);
-					}
-			} else {
-				dprintf(CRITICAL, "boot: Failed to create subdevice: %d\n", ret);
-			}
-			} else {
-				dprintf(CRITICAL, "boot: Failed to open base device '%s'\n", base_device);
-		}
+				ret = bio_publish_subdevice(base_device, subdev_name, start_block, subdev_len);
+				if (ret < 0) {
+					dprintf(CRITICAL, "boot: Failed to create subdevice for slot %c: %d\n", slot, ret);
+					continue;
+				}
+
+				dprintf(INFO, "boot: Trying slot %c: subdevice '%s' at block %u\n",
+					slot, subdev_name, (unsigned)start_block);
+
+				snprintf(mountpoint, sizeof(mountpoint), "/%s", subdev_name);
+				ret = fs_mount(mountpoint, "ext2", subdev_name);
+				if (ret < 0) {
+					dprintf(CRITICAL, "boot: Failed to mount slot %c subdevice '%s'\n", slot, subdev_name);
+					continue;
+				}
+
+				if (DEBUGLEVEL >= SPEW) {
+					dprintf(SPEW, "Scanning %s ...\n", subdev_name);
+					lk2nd_print_file_tree(mountpoint, " ");
+				}
+
+				lk2nd_try_extlinux(mountpoint);
+
+				dprintf(INFO, "boot: Slot %c did not boot, trying next slot\n", slot);
+				fs_unmount(mountpoint);
+
+			} while (lk2nd_boot_ab_advance_slot());
+
 		} else {
-			/* No offset: mount the base device directly */
+			/* No offset: just mount the base device directly */
 			snprintf(mountpoint, sizeof(mountpoint), "/%s", base_device);
 			ret = fs_mount(mountpoint, "ext2", base_device);
 			if (ret >= 0) {
@@ -110,9 +124,9 @@ static void lk2nd_scan_devices(void)
 					lk2nd_print_file_tree(mountpoint, " ");
 				}
 				lk2nd_try_extlinux(mountpoint);
-				return;
 			}
 		}
+		return;
 	}
 
 	/* Fallback: scan all devices as before (non-A/B mode) */

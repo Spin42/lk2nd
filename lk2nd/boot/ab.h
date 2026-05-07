@@ -31,4 +31,7 @@ void lk2nd_boot_ab_set_offsets(uint64_t offset_a, uint64_t offset_b);
 /* Get the boot partition offset for the current slot */
 uint64_t lk2nd_boot_ab_get_offset(void);
 
+/* Switch to the next slot in BOOT_ORDER; false when none are left. */
+bool lk2nd_boot_ab_advance_slot(void);
+
 #endif /* LK2ND_BOOT_AB_H */
