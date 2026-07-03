@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: BSD-3-Clause
+
+/dts-v1/;
+
+#include <skeleton64.dtsi>
+#include <lk2nd.dtsi>
+
+/ {
+	qcom,msm-id = <QCOM_ID_MSM8937 0>;
+	qcom,board-id = <0x2000b 0>;
+};
+
+&lk2nd {
+	model = "Crosscall Action X3";
+	compatible = "crosscall,action-x3";
+
+	lk2nd,dtb-files = "msm8937-crosscall-action-x3";
+
+	lk2nd,match-panel;
+	panel {
+		compatible = "crosscall,action-x3-panel", "lk2nd,panel";
+
+		qcom,mdss_dsi_ili9881c_txd_ivo_720p_video {
+			compatible = "crosscall,action-x3-ili9881c-txd";
+		};
+		qcom,mdss_dsi_ili9881c_hlt_cpt_720p_video {
+			compatible = "crosscall,action-x3-ili9881c-hlt";
+		};
+	};
+};

@@ -4,7 +4,7 @@ LOCAL_DIR := $(GET_LOCAL_DIR)
 ADTBS += \
 	$(LOCAL_DIR)/apq8053-lenovo-cd-18781y.dtb \
 	$(LOCAL_DIR)/msm8953-asus-zenfone3.dtb \
-	$(LOCAL_DIR)/msm8953-billion-rimob.dtb \
+	$(LOCAL_DIR)/msm8953-flipkart-rimob.dtb \
 	$(LOCAL_DIR)/msm8953-huawei-cannes.dtb \
 	$(LOCAL_DIR)/msm8953-huawei-milan.dtb \
 	$(LOCAL_DIR)/msm8953-lenovo-kuntao.dtb \
@@ -28,6 +28,7 @@ ADTBS += \
 	$(LOCAL_DIR)/sdm632-fairphone-fp3.dtb \
 	$(LOCAL_DIR)/sdm632-mtp.dtb \
 	$(LOCAL_DIR)/sdm632-mtp-3.dtb \
+	$(LOCAL_DIR)/sdm632-qrd-sku4.dtb \
 
 QCDTBS += \
 	$(LOCAL_DIR)/msm8953-motorola-potter.dtb \

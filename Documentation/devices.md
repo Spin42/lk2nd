@@ -10,7 +10,7 @@
 - Asus Zenfone 2 Laser (1080p) - Z00T
 - Asus Zenfone 2 Laser ZE500KL - Z00E
 - Asus Zenfone Max ZC550KL (2016) - Z010D
-- Asus ZenPad 8.0 - P024
+- Asus ZenPad 8.0 (Z380KL) - P024
 - BQ Aquaris M5 - piccolo
 - BQ Aquaris X5 - paella, picmt
 - DragonBoard 410c - apq8016-sbc
@@ -36,14 +36,14 @@
 - Panasonic ELUGA U2
 - Samsung Galaxy A3 (2015) - SM-A300F, SM-A300FU, SM-A300YZ
 - Samsung Galaxy A5 (Duos) (2015) - SM-A5000, SM-A500F, SM-A500FU, SM-A500H, SM-A500YZ
-- Samsung Galaxy A7 (2015) - SM-A700YD
+- Samsung Galaxy A7 (2015) - SM-A700H, SM-A700YD
 - Samsung Galaxy Ace 4 - SM-G357FZ (quirky - see comment in `lk2nd/device/dts/msm8916/msm8916-samsung.dts`)
 - Samsung Galaxy Core Max - SM-G5108Q (quirky - see comment in `lk2nd/device/dts/msm8916/msm8916-samsung.dts`)
-- Samsung Galaxy Core Prime LTE - SM-G360F, SM-G360G, SM-G360T, SM-G360V (rossaltezt is quirky - see comment in `lk2nd/device/dts/msm8916/msm8916-samsung.dts`)
+- Samsung Galaxy Core Prime LTE - SM-G360F, SM-G360G, SM-G360M, SM-G360T, SM-G360V (rossaltezt is quirky - see comment in `lk2nd/device/dts/msm8916/msm8916-samsung.dts`)
 - Samsung Galaxy E5 - SM-E500F, SM-E500H
-- Samsung Galaxy E7 - SM-E7000, SM-E700F
-- Samsung Galaxy Grand Max - SM-G720AX
-- Samsung Galaxy Grand Prime - SM-G530FZ, SM-G530H, SM-G530R4, SM-G530W, SM-G530Y (G530Y is quirky - see comment in `lk2nd/device/dts/msm8916/msm8916-samsung.dts`)
+- Samsung Galaxy E7 - SM-E7000, SM-E700F, SM-E700H
+- Samsung Galaxy Grand Max - SM-G7200, SM-G720AX
+- Samsung Galaxy Grand Prime - SM-G530BT, SM-G530FZ, SM-G530H, SM-G530M, SM-G530R4, SM-G530W, SM-G530Y (G530Y is quirky - see comment in `lk2nd/device/dts/msm8916/msm8916-samsung.dts`)
 - Samsung Galaxy J3 (2016) - SM-J3109, SM-J320YZ
 - Samsung Galaxy J3 Pro - SM-J3110, SM-J3119
 - Samsung Galaxy J5 (2015) - SM-J5007, SM-J5008, SM-J500F, SM-J500FN, SM-J500G, SM-J500H, SM-J500M
@@ -145,6 +145,7 @@
 - Samsung Galaxy A6+
 - Samsung Galaxy J8 LTE
 - Samsung Tab A2 XL WIFI
+- Vsmart Joy 3 (casuarina) (requires flashing [minimal DTBO](#minimal-dtb-overlay)) 
 - Xiaomi Mi A1 (tissot)
 - Xiaomi Mi A2 Lite (daisy)
 - Xiaomi Mi Max 2 (oxygen)
@@ -181,7 +182,7 @@
 - LG G Watch R - lenok <!--(use `lk2nd-appended-dtb.img`)-->
 - Motorola Moto G 2013 - falcon
 - Motorola Moto G 4G 2013 - peregrine
-- Motorola Moto G 2014 - titan
+- Motorola Moto G 2014 - titan (quirky - see comment in `lk2nd/device/dts/msm8226/msm8226-motorola-titan.dts`)
 - Motorola Moto G 2014 LTE - thea
 - Samsung Galaxy Grand 2 - SM-G7102
 - Samsung Galaxy Tab 4 10.1 (2014) - SM-T530, SM-T532, SM-T535
@@ -213,6 +214,9 @@
 ### lk2nd-msm8610
 
 - Huawei C8816
+
+### lk2nd-msm8660
+- HP TouchPad (Wi-Fi) (topaz)
 
 ## Minimal DTB Overlay
 
