@@ -2,6 +2,7 @@
 /* A/B partition boot integration for lk2nd (offset-only) */
 
 #include <debug.h>
+#include <printf.h>
 #include <stdlib.h>
 #include <string.h>
 #include <lib/bio.h>
@@ -207,6 +208,69 @@ void lk2nd_boot_ab_init(const char *partition, uint64_t offset, size_t size)
 	ab_state.current_slot = uboot_env_get_boot_slot(&ab_state.env);
 
 	dprintf(INFO, "RAUC A/B boot initialized - current slot: %c\n", ab_state.current_slot);
+}
+
+#define xstr(s) str(s)
+#define str(s) #s
+
+/*
+ * Initialize A/B with the build-time default env location and slot
+ * offsets (LK2ND_AB_* flags), unless it was already initialized.
+ * Returns 0 when A/B is usable after the call.
+ */
+int lk2nd_boot_ab_ensure_init(void)
+{
+#ifdef LK2ND_AB_BOOT
+	if (!ab_state.initialized) {
+		lk2nd_boot_ab_set_offsets(LK2ND_AB_SLOT_OFFSET_A, LK2ND_AB_SLOT_OFFSET_B);
+		lk2nd_boot_ab_init(xstr(LK2ND_AB_ENV_PART), LK2ND_AB_ENV_OFFSET, LK2ND_AB_ENV_SIZE);
+	}
+#endif
+	return ab_state.initialized ? 0 : -1;
+}
+
+/* Get an env variable value; NULL if unset or A/B not initialized */
+const char *lk2nd_boot_ab_env_get(const char *key)
+{
+	if (!ab_state.initialized)
+		return NULL;
+	return uboot_env_get(&ab_state.env, key);
+}
+
+/* Set an env variable (in memory; use lk2nd_boot_ab_env_save to persist) */
+int lk2nd_boot_ab_env_set(const char *key, const char *value)
+{
+	int ret;
+
+	if (!ab_state.initialized)
+		return -1;
+
+	ret = uboot_env_set(&ab_state.env, key, value);
+	if (ret == 0)
+		uboot_env_parse_rauc_vars(&ab_state.env);
+	return ret;
+}
+
+/* Write the env back to storage */
+int lk2nd_boot_ab_env_save(void)
+{
+	if (!ab_state.initialized)
+		return -1;
+	return uboot_env_save(&ab_state.env, ab_state.partition, ab_state.offset);
+}
+
+/* Print all key=value pairs in the env */
+void lk2nd_boot_ab_env_print(void)
+{
+	char *ptr;
+
+	if (!ab_state.initialized || !ab_state.env.data)
+		return;
+
+	for (ptr = ab_state.env.data;
+	     ptr < ab_state.env.data + ab_state.env.data_size && *ptr;
+	     ptr += strlen(ptr) + 1)
+		printf("%s\n", ptr);
 }
 
 /*

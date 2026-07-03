@@ -61,6 +61,9 @@ int uboot_env_save(struct uboot_env *env, const char *partition, uint64_t offset
 /* Free environment resources */
 void uboot_env_free(struct uboot_env *env);
 
+/* Re-parse the cached RAUC boot variables after external changes */
+void uboot_env_parse_rauc_vars(struct uboot_env *env);
+
 /* RAUC-style A/B boot management */
 
 /* Get current boot slot based on BOOT_ORDER and remaining attempts */

@@ -24,7 +24,7 @@ static uint32_t uboot_env_crc(const uint8_t *data, size_t len)
 }
 
 /* Parse RAUC boot variables from environment and cache them */
-static void uboot_env_parse_rauc_vars(struct uboot_env *env)
+void uboot_env_parse_rauc_vars(struct uboot_env *env)
 {
 	const char *boot_order, *boot_a_left, *boot_b_left;
 

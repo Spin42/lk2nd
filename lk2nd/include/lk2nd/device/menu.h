@@ -15,4 +15,12 @@
  */
 int boot_menu_countdown_check(void);
 
+/**
+ * lk2nd_shell() - Interactive U-Boot-style serial command prompt.
+ *
+ * Entered when the boot countdown is interrupted. Does not return
+ * (commands like boot/continue/reset leave the bootloader).
+ */
+void lk2nd_shell(void);
+
 #endif /* __LK2ND_DEVICE_MENU_H */

@@ -18,9 +18,6 @@
 #define LK2ND_BOOT_MIN_SIZE (16 * 1024 * 1024)
 #endif
 
-#define xstr(s) str(s)
-#define str(s) #s
-
 /**
  * lk2nd_mount() - Mount a device on mountpoint, trying all supported
  * filesystems (ext2/3/4 and FAT).
@@ -111,18 +108,11 @@ static void lk2nd_scan_devices(void)
 	if (sd_tried)
 		dprintf(INFO, "boot: SD card did not boot, falling back to eMMC\n");
 
-#ifdef LK2ND_AB_BOOT
-	/* Early A/B bootstrap: the env location comes from the LK2ND_AB_*
-	 * build flags (partition name or GPT label). The slot offsets set
-	 * here are fallback defaults; the BOOT_A_OFFSET/BOOT_B_OFFSET env
-	 * variables override them at runtime.
-	 * Only applies if A/B was not already initialized by extlinux.
+	/* Early A/B bootstrap from the LK2ND_AB_* build defaults, unless
+	 * A/B was already initialized by extlinux. The BOOT_A_OFFSET and
+	 * BOOT_B_OFFSET env variables override the default slot offsets.
 	 */
-	if (!lk2nd_boot_ab_get_base_device()) {
-		lk2nd_boot_ab_set_offsets(LK2ND_AB_SLOT_OFFSET_A, LK2ND_AB_SLOT_OFFSET_B);
-		lk2nd_boot_ab_init(xstr(LK2ND_AB_ENV_PART), LK2ND_AB_ENV_OFFSET, LK2ND_AB_ENV_SIZE);
-	}
-#endif
+	lk2nd_boot_ab_ensure_init();
 
 	/* Check if A/B boot is configured: base device is the U-Boot env partition */
 	base_device = lk2nd_boot_ab_get_base_device();

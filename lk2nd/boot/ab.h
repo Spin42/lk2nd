@@ -36,4 +36,13 @@ uint64_t lk2nd_boot_ab_get_offset(void);
 /* Switch to the next slot in BOOT_ORDER; false when none are left. */
 bool lk2nd_boot_ab_advance_slot(void);
 
+/* Initialize with the LK2ND_AB_* build defaults if not initialized yet */
+int lk2nd_boot_ab_ensure_init(void);
+
+/* U-Boot environment access (for the shell etc.) */
+const char *lk2nd_boot_ab_env_get(const char *key);
+int lk2nd_boot_ab_env_set(const char *key, const char *value);
+int lk2nd_boot_ab_env_save(void);
+void lk2nd_boot_ab_env_print(void);
+
 #endif /* LK2ND_BOOT_AB_H */

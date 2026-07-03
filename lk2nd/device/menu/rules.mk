@@ -6,4 +6,5 @@ $(error lk2nd device menu conflicts with ENABLE_FBCON_DISPLAY_MSG)
 endif
 
 OBJS += \
-	$(LOCAL_DIR)/menu.o
+	$(LOCAL_DIR)/menu.o \
+	$(LOCAL_DIR)/shell.o

@@ -3,5 +3,6 @@
 #define LK2ND_BDEV_H
 
 void lk2nd_bdev_init(void);
+void lk2nd_bdev_dump_devices(void);
 
 #endif
