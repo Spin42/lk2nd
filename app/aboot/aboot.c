@@ -5586,11 +5586,11 @@ void aboot_init(const struct app_descriptor *app)
 	if (is_user_force_reset())
 		goto normal_boot;
 
-#ifdef LK2ND_UMS
-	/* Show boot menu countdown - allows entering fastboot menu via serial console */
+#if defined(LK2ND_BOOT_COUNTDOWN) && WITH_LK2ND_DEVICE_MENU
+	/* Boot countdown - interrupting it over serial enters the lk2nd shell */
 	if (boot_menu_countdown_check()) {
 		boot_into_fastboot = true;
-		dprintf(INFO, "User requested boot menu via countdown\n");
+		dprintf(INFO, "User requested lk2nd shell via countdown\n");
 	}
 #endif
 
