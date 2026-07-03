@@ -133,6 +133,11 @@ $ make TOOLCHAIN_PREFIX=arm-none-eabi- \
 
 #### `LK2ND_ADTBS=`, `LK2ND_QCDTBS=`, `LK2ND_DTBS=` - Only build listed dtbs
 
+#### `LK2ND_BOOT_MEM_SIZE=` - Max boot memory size in bytes
+
+Set the maximum amount of memory available for booting (kernel, device tree,
+and initramfs). Default is `0x03200000` (50 MiB).
+
 ### lk1st specific
 
 #### `LK2ND_COMPATIBLE=` - Board compatible

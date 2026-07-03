@@ -7,13 +7,16 @@ ADTBS += \
 	$(LOCAL_DIR)/msm8917-xiaomi-riva.dtb \
 	$(LOCAL_DIR)/msm8920-motorola-jeter.dtb \
 	$(LOCAL_DIR)/msm8920-mtp.dtb \
+	$(LOCAL_DIR)/msm8937-asus-x00i.dtb \
 	$(LOCAL_DIR)/msm8937-huawei-aum.dtb \
 	$(LOCAL_DIR)/msm8937-crosscall-action-x3.dtb \
+	$(LOCAL_DIR)/msm8937-medion-malata.dtb \
 	$(LOCAL_DIR)/msm8937-motorola-jeter.dtb \
 	$(LOCAL_DIR)/msm8937-mtp.dtb \
 	$(LOCAL_DIR)/msm8937-nokia-nd1.dtb \
 	$(LOCAL_DIR)/msm8937-nokia-ple.dtb \
 	$(LOCAL_DIR)/msm8937-xiaomi-land.dtb \
+	$(LOCAL_DIR)/msm8940-huawei-trt-tl10.dtb \
 	$(LOCAL_DIR)/msm8940-mtp.dtb \
 	$(LOCAL_DIR)/msm8940-oppo-a57.dtb \
 	$(LOCAL_DIR)/msm8940-xiaomi-santoni.dtb \
@@ -27,6 +30,8 @@ ADTBS += \
 	$(LOCAL_DIR)/sdm429w-fossil-hoki.dtb \
 	$(LOCAL_DIR)/sdm439-qrd-2.dtb \
 	$(LOCAL_DIR)/sdm439-xiaomi-olive.dtb \
+	$(LOCAL_DIR)/qm215-mtp.dtb \
 
 DTBS += \
 	$(LOCAL_DIR)/msm8917-huawei-agassi.dtb \
+	$(LOCAL_DIR)/msm8917-huawei-kobe.dtb \

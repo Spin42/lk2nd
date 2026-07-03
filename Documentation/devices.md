@@ -50,14 +50,19 @@
 - Samsung Galaxy J5 (2016) - SM-J5108, SM-J510F, SM-J510FN, SM-J510GN, SM-J510H, SM-J510L, SM-J510MN, SM-J510UN
 - Samsung Galaxy J7 (2015) - SM-J7008, SM-J700P
 - Samsung Galaxy On7 (2015) - SM-G6000, SM-G600FY, SM-G600S
+- Samsung Galaxy S4 - GT-I9505
 - Samsung Galaxy S4 Mini Value Edition - GT-I9195I
 - Samsung Galaxy Tab 4 10.1 (2015) - SM-T533
 - Samsung Galaxy Tab A 8.0 (2015) - SM-T350, SM-T355, SM-T355Y, SM-T357W
 - Samsung Galaxy Tab A 9.7 (2015) - SM-T550, SM-T555
 - Samsung Galaxy Tab E 9.6 WiFi (2015) - SM-T560NU
-- Vivo Y13L (2015) - pd1304cl
+- Vivo Y13L / Y613f / Y913 - PD1304CL, PD1304CF, PD1304CV (use lk1st quirky - see comment in `lk2nd/device/dts/msm8916/msm8916-vivo-cdp-1.dts`)
+- Vivo Y23L / Y623 / Y923 - PD1419L, PD1419F, PD1419V (use lk1st quirky - see comment in `lk2nd/device/dts/msm8916/msm8916-vivo-cdp-1.dts`)
 - Vivo Y21L
+- Vivo Y27L / Y627 / Y927 - PD1410L, PD1410F, PD1410V (use lk1st quirky - see comment in `lk2nd/device/dts/msm8916/msm8916-vivo-cdp-1.dts`)
+- Vivo Y28L / Y628 / Y928 - PD1403L, PD1403F, PD1403V (use lk1st quirky - see comment in `lk2nd/device/dts/msm8916/msm8916-vivo-cdp-1.dts`)
 - Vivo Y31 (2015) - pd1505
+- Vivo Y31A (2016) - pd1505f
 - Vivo Y51L (2015) - pd1510
 - Vodafone Smart prime 6
 - Wiko Pulp 4G
@@ -74,6 +79,7 @@
 - CAT B35
 - FarEasTone Smart 506 (quirky - see comment in `lk2nd/device/dts/msm8909/msm8909-1gb-qrd-skuc.dts`)
 - Haier G151 / Andromax A (quirky - see comment in `lk2nd/device/dts/msm8909/msm8909-1gb-qrd-skuc.dts`)
+- Huawei Honor 4A - scale
 - Lenovo Yoga Tab 3 8 LTE / WIFI
 - Lenovo Yoga Tab 3 10 LTE / WIFI
 - Lenovo Tab 10 (TB-X103F)
@@ -82,21 +88,29 @@
 - Nokia 8000 4G
 - Nokia 8110 4G
 - ZTE N818S (sapphire)
+- Lenovo Tab e10 (TB-X104F)
 
 ### lk2nd-msm8952
 
 - Alcatel Idol 4 (6055*)
+- Asus Zenfone 4 Max Pro (x00i)
 - BQ X5 Plus (Longcheer L9360)
+- Cat S22 Flip (S22FLIP)
 - Fossil Gen 6 (hoki) (requires flashing [minimal DTBO](#minimal-dtb-overlay))
 - General Mobile GM 5 Plus (shamrock)
 - HMD Global Nokia 4.2 (panther) (requires flashing [minimal DTBO](#minimal-dtb-overlay))
 - HMD Global Nokia 5 (nd1)
 - HMD Global Nokia 6 (ple)
+- Huawei Enjoy 7 Plus (trt-tl10)
 - Huawei Honor 7C (aum-l41) (quirky - see comment in `lk2nd/device/dts/msm8952/msm8937-huawei-aum.dts`)
 - Huawei MediaPad T3 10 (ags- l09/l03/w09) (quirky - see comment in `lk2nd/device/dts/msm8952/msm8917-huawei-agassi.dts`)
+- Huawei MediaPad T3 8 (kob- l09/l09chn/w09/w09chn) (quirky - see comment in `lk2nd/device/dts/msm8952/msm8917-huawei-kobe.dts`)
 - Leeco s2
 - Lenovo K5 Play (l38011)
 - Lenovo Tab M10 HD (TB-X505X) (requires flashing [minimal DTBO](#minimal-dtb-overlay))
+- Medion Lifetab P10610 (Malata)
+- Motorola Moto E4 (perry) (MSM8917)
+- Motorola Moto E4 (perry) (MSM8920)
 - Motorola Moto E5 (nora)
 - Motorola Moto E5 Plus (hannah) (MSM8917)
 - Motorola Moto E5 Plus (hannah) (MSM8937)
@@ -105,6 +119,7 @@
 - Motorola Moto G5S (montana)
 - Motorola Moto G6 Play (jeter)
 - OPPO A57 (A57) (quirky - see comment in `lk2nd/device/dts/msm8952/msm8940-oppo-a57.dts`)
+- QiKU 360 N5 (qk1605-a01) (quirky - see comment in `lk2nd/device/dts/msm8952/msm8976-360-qk1605-a01.dts`)
 - Redmi 3S (land)
 - Redmi 4 (prada)
 - Redmi 4A (rolex)
@@ -126,6 +141,7 @@
 
 - Asus Zenfone 3 ZE520KL/ZE552KL (zenfone3)
 - Billion Capture+ (rimob)
+- CMCC N2 / YU Yureka 2 (wt89536)
 - Fairphone 3
 - Huawei Maimang 5 / Nova Plus / G9 (Plus) (milan)
 - Huawei Nova (cannes)
@@ -133,6 +149,7 @@
 - Lenovo ThinkSmart View (cd-18781y) (quirky - see comments in `lk2nd/device/dts/msm8953/apq8053-lenovo-cd-18781y.dts`)
 - Meizu M6 Note (m1721)
 - Meizu M15 (m1871)
+- Meizu Note 8 (m1822)
 - Motorola Moto G5 Plus (potter)
 - Motorola Moto G5s Plus (sanders)
 - Motorola Moto G6 (ali)
@@ -142,10 +159,12 @@
 - Motorola One (deen)
 - OPPO R9s/R9sk (R9s/R9sk) (quirky - see comments in `lk2nd/device/dts/msm8953/msm8953-oppo-r9s.dts`)
 - OPPO Realme 2 (RMX1805/RMX1809) / C1 (RMX1811) (requires flashing [minimal DTBO](#minimal-dtb-overlay))
+- Qiku 360 N4s Snapdragon (QK1505-A02) (quirky - see comments in `lk2nd/device/dts/msm8953/msm8953-qrd-sku3.dts`)
 - Samsung Galaxy A6+
 - Samsung Galaxy J8 LTE
 - Samsung Tab A2 XL WIFI
 - Vsmart Joy 3 (casuarina) (requires flashing [minimal DTBO](#minimal-dtb-overlay)) 
+- Xiaomi Mi 5X (tiffany)
 - Xiaomi Mi A1 (tissot)
 - Xiaomi Mi A2 Lite (daisy)
 - Xiaomi Mi Max 2 (oxygen)
@@ -171,6 +190,8 @@
 - Samsung Galaxy S5 China LTE (Duos) - SM-G9006V/W, SM-G9008V/W, SM-G9009W
 - Sony Xperia Z3 - leo (quirky - see comment in `lk2nd/device/dts/msm8974/msm8974pro-sony-leo.dts`)
 - Sony Xperia Z3 Compact - aries (quirky - see comment in `lk2nd/device/dts/msm8974/msm8974pro-sony-aries.dts`)
+- Xiaomi 4 LTE - cancro
+- Xiaomi Note LTE - virgo
 
 ### lk2nd-msm8226
 - ASUS ZenWatch 2 - sparrow
@@ -182,10 +203,10 @@
 - LG G Watch R - lenok <!--(use `lk2nd-appended-dtb.img`)-->
 - Motorola Moto G 2013 - falcon
 - Motorola Moto G 4G 2013 - peregrine
-- Motorola Moto G 2014 - titan (quirky - see comment in `lk2nd/device/dts/msm8226/msm8226-motorola-titan.dts`)
+- Motorola Moto G 2014 - titan
 - Motorola Moto G 2014 LTE - thea
 - Samsung Galaxy Grand 2 - SM-G7102
-- Samsung Galaxy Tab 4 10.1 (2014) - SM-T530, SM-T532, SM-T535
+- Samsung Galaxy Tab 4 10.1 (2014) - SM-T530, SM-T531, SM-T532, SM-T535
 - Samsung Galaxy Tab 4 8.0 (2014) - SM-T330, SM-T330NU, SM-T331
 - Sony Xperia M2 - eagle (quirky - see comment in `lk2nd/device/dts/msm8226/msm8926-v2-720p-mtp.dts`)
 
@@ -197,6 +218,7 @@
 
 - LG G5 - h850
 - LG V20 - h990
+- OnePlus 3
 - OnePlus 3T
 - Xiaomi Mi 5 - gemini
 - Xiaomi Mi 5s - capricorn
@@ -206,6 +228,7 @@
 
 ### lk2nd-msm8960
 
+- Asus Nexus 7 (flo)
 - Samsung Galaxy Ace 3 LTE (GT-S7275R) (display refresh doesn't work)
 - Samsung Galaxy Express (SGH-I437)
 - Samsung Galaxy S4 Mini (GT-I9195)
