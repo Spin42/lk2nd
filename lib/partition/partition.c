@@ -26,8 +26,10 @@
 #include <compiler.h>
 #include <stdlib.h>
 #include <arch.h>
+#include <crc32.h>
 #include <lib/bio.h>
 #include <lib/partition.h>
+#include <partition_parser.h>
 
 struct chs {
 	uint8_t c;
@@ -44,10 +46,153 @@ struct mbr_part {
 	uint32_t lba_length;
 } __PACKED;
 
+#define GPT_MAX_PUBLISH 16
+#define MBR_TYPE_GPT_PROTECTIVE 0xee
+
+/*
+ * Extract the partition name the same way the eMMC GPT parser does
+ * (mmc_boot_read_gpt): names are UTF-16LE, only english is supported
+ * so the 2nd byte of each character is dropped.
+ */
+static char *gpt_entry_name(const unsigned char *utf16_name)
+{
+	char *name = malloc(MAX_GPT_NAME_SIZE / 2 + 1);
+	unsigned int n;
+
+	if (!name)
+		return NULL;
+
+	for (n = 0; n < MAX_GPT_NAME_SIZE / 2; n++)
+		name[n] = utf16_name[n * 2];
+	name[MAX_GPT_NAME_SIZE / 2] = '\0';
+
+	return name;
+}
+
+/*
+ * Look for a GPT on the device and publish its partitions.
+ *
+ * This is a bio-device version of the boot-eMMC-only GPT parser in
+ * platform/msm_shared/partition_parser.c and reuses its layout macros;
+ * the header is validated like partition_parse_gpt_header() does.
+ *
+ * Returns the number of published partitions, or a negative value
+ * when no valid GPT was found.
+ */
+static int publish_gpt(bdev_t *dev, const char *device, off_t offset)
+{
+	unsigned long long first_usable_lba, entries_lba, first_lba, last_lba;
+	unsigned int header_size, max_partition_count, partition_entry_size;
+	unsigned int part_entry_cnt;
+	uint32_t crc_val, crc_val_org;
+	unsigned int i, count = 0;
+	int err;
+
+	STACKBUF_DMA_ALIGN(data, dev->block_size);
+
+	err = bio_read(dev, data, offset + GPT_LBA * dev->block_size,
+		       dev->block_size);
+	if (err != (int)dev->block_size)
+		return (err < 0) ? err : -1;
+
+	/* Check GPT Signature */
+	if (((uint32_t *)data)[0] != GPT_SIGNATURE_2 ||
+	    ((uint32_t *)data)[1] != GPT_SIGNATURE_1)
+		return -1;
+
+	header_size = GET_LWORD_FROM_BYTE(&data[HEADER_SIZE_OFFSET]);
+	if (header_size < GPT_HEADER_SIZE || header_size > dev->block_size) {
+		dprintf(INFO, "gpt on '%s': invalid header size\n", device);
+		return -1;
+	}
+
+	crc_val_org = GET_LWORD_FROM_BYTE(&data[HEADER_CRC_OFFSET]);
+	PUT_LONG(&data[HEADER_CRC_OFFSET], 0);
+	crc_val = crc32(~0L, data, header_size) ^ (~0L);
+	if (crc_val != crc_val_org) {
+		dprintf(INFO, "gpt on '%s': header crc mismatch\n", device);
+		return -1;
+	}
+
+	if (GET_LLWORD_FROM_BYTE(&data[PRIMARY_HEADER_OFFSET]) != GPT_LBA) {
+		dprintf(INFO, "gpt on '%s': primary header LBA mismatch\n", device);
+		return -1;
+	}
+
+	first_usable_lba = GET_LLWORD_FROM_BYTE(&data[FIRST_USABLE_LBA_OFFSET]);
+	entries_lba = GET_LLWORD_FROM_BYTE(&data[PARTITION_ENTRIES_OFFSET]);
+	max_partition_count = GET_LWORD_FROM_BYTE(&data[PARTITION_COUNT_OFFSET]);
+	partition_entry_size = GET_LWORD_FROM_BYTE(&data[PENTRY_SIZE_OFFSET]);
+
+	if (partition_entry_size < ENTRY_SIZE ||
+	    partition_entry_size > dev->block_size ||
+	    max_partition_count > NUM_PARTITIONS || entries_lba < 2) {
+		dprintf(INFO, "gpt on '%s': invalid header\n", device);
+		return -1;
+	}
+
+	dprintf(SPEW, "gpt on '%s': %u entries at lba %llu\n",
+		device, max_partition_count, entries_lba);
+
+	part_entry_cnt = dev->block_size / partition_entry_size;
+
+	for (i = 0; i < max_partition_count && count < GPT_MAX_PUBLISH; i++) {
+		const unsigned char *entry;
+		char subdevice[128];
+		bdev_t *subdev;
+
+		/* Read the next block of partition entries */
+		if (i % part_entry_cnt == 0) {
+			err = bio_read(dev, data, offset +
+				       (entries_lba + i / part_entry_cnt) *
+				       dev->block_size, dev->block_size);
+			if (err != (int)dev->block_size)
+				break;
+		}
+		entry = &data[(i % part_entry_cnt) * partition_entry_size];
+
+		/* An unused type GUID terminates the table */
+		if (entry[0] == 0x00 && entry[1] == 0x00)
+			break;
+
+		first_lba = GET_LLWORD_FROM_BYTE(&entry[FIRST_LBA_OFFSET]);
+		last_lba = GET_LLWORD_FROM_BYTE(&entry[LAST_LBA_OFFSET]);
+
+		/* If the partition entry LBA is not valid, skip this entry */
+		if (first_lba < first_usable_lba || first_lba > last_lba ||
+		    last_lba >= dev->block_count) {
+			dprintf(INFO, "gpt on '%s': entry %d lba not valid\n",
+				device, i);
+			continue;
+		}
+
+		sprintf(subdevice, "%sp%d", device, i);
+
+		err = bio_publish_subdevice(device, subdevice, first_lba,
+					    last_lba - first_lba + 1);
+		if (err < 0) {
+			dprintf(INFO, "error publishing subdevice '%s'\n", subdevice);
+			continue;
+		}
+
+		subdev = bio_open(subdevice);
+		if (subdev) {
+			subdev->label = gpt_entry_name(&entry[PARTITION_NAME_OFFSET]);
+			bio_close(subdev);
+		}
+		count++;
+	}
+
+	return count;
+}
+
 static status_t validate_mbr_partition(bdev_t *dev, const struct mbr_part *part)
 {
 	/* check for invalid types */
 	if (part->type == 0)
+		return -1;
+	/* a protective MBR means the real partition table is a (corrupt) GPT */
+	if (part->type == MBR_TYPE_GPT_PROTECTIVE)
 		return -1;
 	/* check for invalid status */
 	if (part->status != 0x80 && part->status != 0x00)
@@ -80,7 +225,15 @@ int partition_publish(const char *device, off_t offset)
 
 	// get a dma aligned and padded block to read info
 	STACKBUF_DMA_ALIGN(buf, dev->block_size);
-	
+
+	/* sniff for a GPT first */
+	count = publish_gpt(dev, device, offset);
+	if (count >= 0) {
+		bio_close(dev);
+		return count;
+	}
+	count = 0;
+
 	/* sniff for MBR partition types */
 	do {
 		int i;
