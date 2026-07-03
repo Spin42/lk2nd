@@ -18,6 +18,9 @@
 #define LK2ND_BOOT_MIN_SIZE (16 * 1024 * 1024)
 #endif
 
+#define xstr(s) str(s)
+#define str(s) #s
+
 /**
  * lk2nd_scan_devices() - Scan filesystems and try to boot
  */
@@ -31,19 +34,18 @@ static void lk2nd_scan_devices(void)
 	uint64_t target_offset = 0;
 	char subdev_name[64];
 
-	/* Early default A/B bootstrap (generic, not RAUC-specific)
-	 * Only applies if A/B not already initialized by extlinux (env + offsets).
-	 * Defaults chosen for Fairphone 2 userdata layout:
-	 *   env partition: mmcblk0p20 (resolved internally)
-	 *   env offset:    0x10000
-	 *   env size:      0x20000
-	 *   slot A offset: 0x00100000
-	 *   slot B offset: 0x04100000
+#ifdef LK2ND_AB_BOOT
+	/* Early A/B bootstrap: the env location comes from the LK2ND_AB_*
+	 * build flags (partition name or GPT label). The slot offsets set
+	 * here are fallback defaults; the BOOT_A_OFFSET/BOOT_B_OFFSET env
+	 * variables override them at runtime.
+	 * Only applies if A/B was not already initialized by extlinux.
 	 */
 	if (!lk2nd_boot_ab_get_base_device()) {
-		lk2nd_boot_ab_init("mmcblk0p20", 0x10000, 0x20000);
-		lk2nd_boot_ab_set_offsets(0x00100000ULL, 0x04100000ULL);
+		lk2nd_boot_ab_set_offsets(LK2ND_AB_SLOT_OFFSET_A, LK2ND_AB_SLOT_OFFSET_B);
+		lk2nd_boot_ab_init(xstr(LK2ND_AB_ENV_PART), LK2ND_AB_ENV_OFFSET, LK2ND_AB_ENV_SIZE);
 	}
+#endif
 
 	dprintf(INFO, "boot: Trying to boot from the file system...\n");
 

@@ -15,8 +15,9 @@
  * Generic A/B Boot Implementation (offset-only)
  *
  * Uses U-Boot environment variables stored at a fixed offset within a base
- * partition (e.g. mmcblk0p20). Offsets for slots A/B are byte offsets within
- * the same base partition.
+ * partition (referenced by name, Linux-style mmcblkXpN name or GPT label,
+ * e.g. "userdata"). Offsets for slots A/B are byte offsets within the same
+ * base partition.
  *
  * Optional configuration via extlinux.conf (global directives):
  *   ab_env_part <partition>
@@ -36,6 +37,9 @@
  * - BOOT_ORDER: Space-separated slot list to try (e.g., "A B")
  * - BOOT_A_LEFT: Remaining boot attempts for slot A
  * - BOOT_B_LEFT: Remaining boot attempts for slot B
+ * - BOOT_A_OFFSET: Optional slot A byte offset (hex or decimal), overrides
+ *                  the compiled-in default; set from userspace with fw_setenv
+ * - BOOT_B_OFFSET: Optional slot B byte offset, same as above
  */
 
 /* Global A/B boot state */
@@ -46,9 +50,43 @@ static struct {
 	size_t size;
 	bool initialized;
 	char current_slot;  /* Cached current boot slot */
-	uint64_t boot_offset_a;  /* Boot partition offset for slot A (0 = no offset) */
-	uint64_t boot_offset_b;  /* Boot partition offset for slot B (0 = no offset) */
+	uint64_t boot_offset_a;  /* Configured offset for slot A (0 = no offset) */
+	uint64_t boot_offset_b;  /* Configured offset for slot B (0 = no offset) */
+	uint64_t env_offset_a;  /* Offset for slot A from BOOT_A_OFFSET (0 = unset) */
+	uint64_t env_offset_b;  /* Offset for slot B from BOOT_B_OFFSET (0 = unset) */
 } ab_state = {0};
+
+/* Parse a hex ("0x...") or decimal number */
+static uint64_t parse_u64(const char *s)
+{
+	uint64_t val = 0;
+
+	if (!s)
+		return 0;
+
+	if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+		s += 2;
+		while (*s) {
+			char c = *s;
+			if (c >= '0' && c <= '9')
+				val = (val << 4) | (c - '0');
+			else if (c >= 'a' && c <= 'f')
+				val = (val << 4) | (c - 'a' + 10);
+			else if (c >= 'A' && c <= 'F')
+				val = (val << 4) | (c - 'A' + 10);
+			else
+				break;
+			s++;
+		}
+	} else {
+		while (*s >= '0' && *s <= '9') {
+			val = val * 10 + (*s - '0');
+			s++;
+		}
+	}
+
+	return val;
+}
 
 /*
  * Resolve a base device spec:
@@ -158,6 +196,13 @@ void lk2nd_boot_ab_init(const char *partition, uint64_t offset, size_t size)
 	ab_state.size = size;
 	ab_state.initialized = true;
 
+	/* Optional per-slot offsets from the env, overriding compiled-in defaults */
+	ab_state.env_offset_a = parse_u64(uboot_env_get(&ab_state.env, "BOOT_A_OFFSET"));
+	ab_state.env_offset_b = parse_u64(uboot_env_get(&ab_state.env, "BOOT_B_OFFSET"));
+	if (ab_state.env_offset_a || ab_state.env_offset_b)
+		dprintf(INFO, "A/B boot: env slot offsets: A=0x%llx, B=0x%llx\n",
+			ab_state.env_offset_a, ab_state.env_offset_b);
+
 	/* Determine initial boot slot based on BOOT_ORDER and counters */
 	ab_state.current_slot = uboot_env_get_boot_slot(&ab_state.env);
 
@@ -259,6 +304,7 @@ bool lk2nd_boot_ab_advance_slot(void)
 
 /*
  * Get the boot partition offset for the current slot
+ * BOOT_<slot>_OFFSET env variables take precedence over configured offsets.
  * Returns 0 if not configured or no offset needed
  */
 uint64_t lk2nd_boot_ab_get_offset(void)
@@ -267,9 +313,9 @@ uint64_t lk2nd_boot_ab_get_offset(void)
 		return 0;
 
 	if (ab_state.current_slot == 'A')
-		return ab_state.boot_offset_a;
+		return ab_state.env_offset_a ?: ab_state.boot_offset_a;
 	else if (ab_state.current_slot == 'B')
-		return ab_state.boot_offset_b;
+		return ab_state.env_offset_b ?: ab_state.boot_offset_b;
 
 	return 0;
 }
