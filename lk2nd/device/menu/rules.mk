@@ -8,3 +8,7 @@ endif
 OBJS += \
 	$(LOCAL_DIR)/menu.o \
 	$(LOCAL_DIR)/shell.o
+
+ifeq ($(LK2ND_USB_CONSOLE),1)
+OBJS += $(LOCAL_DIR)/usbcon.o
+endif

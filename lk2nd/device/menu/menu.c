@@ -366,6 +366,11 @@ int boot_menu_countdown_check(void)
 	char c;
 	bool triggered = false;
 
+#ifdef LK2ND_USB_CONSOLE
+	/* Make the countdown interruptible over USB as well */
+	lk2nd_usbcon_start();
+#endif
+
 	dprintf(ALWAYS, "\n=== lk2nd ===\n");
 	dprintf(ALWAYS, "Press any key within %d seconds for the lk2nd shell\n",
 		countdown);
@@ -390,9 +395,23 @@ int boot_menu_countdown_check(void)
 			countdown--;
 	}
 
-	if (triggered)
+	if (triggered) {
+		/*
+		 * Run the shell right here, before fastboot mode claims
+		 * the USB controller, so a session over the USB serial
+		 * console stays alive. The shell only returns when the
+		 * 'fastboot' command asks to continue into fastboot mode.
+		 */
+		lk2nd_shell();
+#ifdef LK2ND_USB_CONSOLE
+		lk2nd_usbcon_stop();
+#endif
 		return 1;
+	}
 
 	dprintf(ALWAYS, "\rNo key pressed -- continuing normal boot   \n\n");
+#ifdef LK2ND_USB_CONSOLE
+	lk2nd_usbcon_stop();
+#endif
 	return 0;
 }

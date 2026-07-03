@@ -57,6 +57,7 @@ struct shell_cmd {
 };
 
 static const struct shell_cmd shell_cmds[];
+static bool shell_exit;
 
 /* Parse a hex ("0x...") or decimal number */
 static unsigned long shell_parse_num(const char *s)
@@ -374,6 +375,17 @@ static int cmd_ums(int argc, char **argv)
 }
 #endif
 
+static int cmd_fastboot(int argc, char **argv)
+{
+	printf("continuing into fastboot mode");
+#ifdef LK2ND_USB_CONSOLE
+	printf(" (the USB serial console stops)");
+#endif
+	printf("\n");
+	shell_exit = true;
+	return 0;
+}
+
 static int cmd_reset(int argc, char **argv)
 {
 	printf("resetting...\n");
@@ -421,6 +433,7 @@ static const struct shell_cmd shell_cmds[] = {
 #ifdef LK2ND_UMS
 	{ "ums",      "[device] - USB mass storage mode",           cmd_ums },
 #endif
+	{ "fastboot", "leave the shell, start fastboot mode",       cmd_fastboot },
 	{ "reset",    "reboot the device",                          cmd_reset },
 	{ "reboot",   "[bootloader|recovery|edl] - reboot",         cmd_reboot },
 	{ "poweroff", "shut the device down",                       cmd_poweroff },
@@ -438,10 +451,11 @@ void lk2nd_shell(void)
 	int argc;
 
 	debug_uart_suppress = 0;
+	shell_exit = false;
 
 	printf("\nlk2nd %s - type 'help' for commands\n", LK2ND_VERSION);
 
-	for (;;) {
+	while (!shell_exit) {
 		printf("lk2nd> ");
 		shell_readline(line, sizeof(line));
 

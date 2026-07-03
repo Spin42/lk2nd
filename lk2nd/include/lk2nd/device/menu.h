@@ -23,4 +23,16 @@ int boot_menu_countdown_check(void);
  */
 void lk2nd_shell(void);
 
+/*
+ * USB serial console (lk2nd/device/menu/usbcon.c). Started during the
+ * boot countdown so the shell is reachable over USB without UART
+ * access; see the file header for host-side usage.
+ */
+int lk2nd_usbcon_start(void);
+void lk2nd_usbcon_stop(void);
+
+/* Console hooks called from _dputc()/dgetc() (weak stubs in debug.c) */
+void lk2nd_usbcon_putc(char c);
+int lk2nd_usbcon_getc(char *c);
+
 #endif /* __LK2ND_DEVICE_MENU_H */

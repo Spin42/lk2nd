@@ -6,6 +6,9 @@ LK2ND_SKIP_GDSC_CHECK ?= 0
 LK2ND_SERIAL_MENU ?= 0
 # Boot countdown into the serial shell (set to 0 to boot immediately)
 LK2ND_BOOT_COUNTDOWN ?= 1
+# USB serial console: makes the countdown/shell reachable over USB
+# (host: modprobe usbserial vendor=0x1d6b product=0x0104)
+LK2ND_USB_CONSOLE ?= 1
 # Boot menu countdown duration in seconds (before auto-booting)
 LK2ND_MENU_TIMEOUT ?= 10
 # USB Mass Storage configuration
@@ -37,6 +40,11 @@ endif
 # Boot countdown into the serial shell
 ifeq ($(LK2ND_BOOT_COUNTDOWN),1)
 DEFINES += LK2ND_BOOT_COUNTDOWN=1
+endif
+
+# USB serial console
+ifeq ($(LK2ND_USB_CONSOLE),1)
+DEFINES += LK2ND_USB_CONSOLE=1
 endif
 DEFINES += LK2ND_MENU_TIMEOUT=$(LK2ND_MENU_TIMEOUT)
 

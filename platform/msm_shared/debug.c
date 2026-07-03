@@ -153,6 +153,22 @@ void _serial_putc(char c)
 #endif
 }
 
+/*
+ * USB serial console hooks, implemented by lk2nd/device/menu/usbcon.c
+ * when the feature is built in. The weak defaults keep other
+ * configurations linking.
+ */
+__WEAK void lk2nd_usbcon_putc(char c)
+{
+	(void)c;
+}
+
+__WEAK int lk2nd_usbcon_getc(char *c)
+{
+	(void)c;
+	return -1;
+}
+
 void _dputc(char c)
 {
 #if WITH_DEBUG_LOG_BUF
@@ -161,6 +177,8 @@ void _dputc(char c)
 	/* Skip all interactive outputs when suppressed (menu active) */
 	if (debug_uart_suppress)
 		return;
+
+	lk2nd_usbcon_putc(c);
 #if WITH_DEBUG_DCC
 	if (c == '\n') {
 		write_dcc('\r');
@@ -189,7 +207,8 @@ int dgetc(char *c, bool wait)
 	n = -1;
 #endif
 	if (n < 0) {
-		return -1;
+		/* Fall back to the USB serial console, if any */
+		return lk2nd_usbcon_getc(c);
 	} else {
 		*c = n;
 		return 0;
