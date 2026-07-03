@@ -89,10 +89,11 @@ struct cbw;
 
 /*
  * USB controller transfer limits (must match HSUSB / DWC drivers).
- * HSUSB: 2 TDs x 16 KiB = 32 KiB per udc_request_queue() call.
+ * HSUSB: MAX_TDS_PER_REQUEST (32) TDs x 16 KiB = 512 KiB per
+ *        udc_request_queue() call.
  * DWC:   single TRB can do ~16 MiB.
  */
-#define UMS_HSUSB_MAX_XFER      (32 * 1024)
+#define UMS_HSUSB_MAX_XFER      (512 * 1024)
 #define UMS_DWC_MAX_XFER         (16 * 1024 * 1024)
 
 /* Command Block Wrapper (CBW) */

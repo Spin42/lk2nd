@@ -50,10 +50,16 @@
 
 #define MAX_TD_XFER_SIZE  (16 * 1024)
 
-#include <arch/ops.h>
+/*
+ * Number of transfer descriptors pre-allocated per request. Each TD
+ * moves up to MAX_TD_XFER_SIZE, so one request can transfer up to
+ * MAX_TDS_PER_REQUEST * MAX_TD_XFER_SIZE (512 KiB) with a single
+ * completion interrupt. UMS_HSUSB_MAX_XFER relies on this limit.
+ */
+#define MAX_TDS_PER_REQUEST  32
+#define TD_STRIDE  ROUNDUP(sizeof(struct ept_queue_item), CACHE_LINE)
 
-/* MSC class request codes provided by <hw/usb.h> */
-BUF_DMA_ALIGN(transfer_desc_item, ROUNDUP(sizeof(struct ept_queue_item), CACHE_LINE));
+#include <arch/ops.h>
 
 /* common code - factor out into a shared file */
 
@@ -151,8 +157,14 @@ __WEAK void hsusb_clock_init(void)
 
 struct usb_request {
 	struct udc_request req;
-	struct ept_queue_item *item;
+	struct ept_queue_item *item;	/* first TD of the per-request pool */
 };
+
+/* TD i of a request's pool (TDs are laid out contiguously, TD_STRIDE apart) */
+static struct ept_queue_item *req_td(struct usb_request *req, unsigned i)
+{
+	return (struct ept_queue_item *)((addr_t)req->item + i * TD_STRIDE);
+}
 
 struct udc_endpoint {
 	struct udc_endpoint *next;
@@ -280,19 +292,23 @@ struct udc_request *udc_request_alloc(void)
 	ASSERT(req);
 	req->req.buf = 0;
 	req->req.length = 0;
-	req->item = memalign(CACHE_LINE, ROUNDUP(sizeof(struct ept_queue_item),
-								CACHE_LINE));
+	req->item = memalign(CACHE_LINE, MAX_TDS_PER_REQUEST * TD_STRIDE);
+	ASSERT(req->item);
 	return &req->req;
 }
 
 void udc_request_free(struct udc_request *req)
 {
+	struct usb_request *_req = (struct usb_request *)req;
+
+	free(_req->item);
 	free(req);
 }
 
 /*
- * Assumes that TDs allocated already are not freed.
- * But it can handle case where TDs are freed as well.
+ * Builds the TD chain for the transfer from the request's TD pool.
+ * A request can carry at most MAX_TDS_PER_REQUEST * MAX_TD_XFER_SIZE
+ * bytes; callers must chunk larger transfers.
  */
 int udc_request_queue(struct udc_endpoint *ept, struct udc_request *_req)
 {
@@ -301,37 +317,20 @@ int udc_request_queue(struct udc_endpoint *ept, struct udc_request *_req)
 	struct usb_request *req = (struct usb_request *)_req;
 	unsigned phys = (unsigned)req->req.buf;
 	unsigned len = req->req.length;
+	unsigned tds_used, i;
 
-	xfer = (len > MAX_TD_XFER_SIZE) ? MAX_TD_XFER_SIZE : len;
-	/*
-	 * First TD allocated during request allocation
-	 */
-	curr_item = req->item;
-	curr_item->info = INFO_BYTES(xfer) | INFO_ACTIVE;
-	curr_item->page0 = phys;
-	curr_item->page1 = (phys & 0xfffff000) + 0x1000;
-	curr_item->page2 = (phys & 0xfffff000) + 0x2000;
-	curr_item->page3 = (phys & 0xfffff000) + 0x3000;
-	curr_item->page4 = (phys & 0xfffff000) + 0x4000;
-	phys += xfer;
-	len -= xfer;
+	ASSERT(len <= MAX_TDS_PER_REQUEST * MAX_TD_XFER_SIZE);
 
 	/*
-	 * If transfer length is more then
-	 * accomodate by 1 TD
-	 * we add more transfer descriptors
+	 * Fill one TD from the request's pool per MAX_TD_XFER_SIZE of
+	 * transfer, linking each to the next.
 	 */
-	while (len > 0) {
+	curr_item = NULL;
+	tds_used = 0;
+	do {
 		xfer = (len > MAX_TD_XFER_SIZE) ? MAX_TD_XFER_SIZE : len;
-		if (curr_item->next == TERMINATE) {
-				curr_item->next = PA((addr_t)transfer_desc_item);
-				item = (struct ept_queue_item *)transfer_desc_item;
-				item->next = TERMINATE;
-		} else
-			/* Since next TD in chain already exists */
-			item = (struct ept_queue_item *)VA(curr_item->next);
 
-		/* Update TD with transfer information */
+		item = req_td(req, tds_used);
 		item->info = INFO_BYTES(xfer) | INFO_ACTIVE;
 		item->page0 = phys;
 		item->page1 = (phys & 0xfffff000) + 0x1000;
@@ -339,10 +338,14 @@ int udc_request_queue(struct udc_endpoint *ept, struct udc_request *_req)
 		item->page3 = (phys & 0xfffff000) + 0x3000;
 		item->page4 = (phys & 0xfffff000) + 0x4000;
 
+		if (curr_item)
+			curr_item->next = PA((addr_t)item);
+
 		curr_item = item;
-		len -= xfer;
+		tds_used++;
 		phys += xfer;
-	}
+		len -= xfer;
+	} while (len > 0);
 
 	/* Terminate and set interrupt for last TD */
 	curr_item->next = TERMINATE;
@@ -360,17 +363,10 @@ int udc_request_queue(struct udc_endpoint *ept, struct udc_request *_req)
 	arch_clean_invalidate_cache_range((addr_t) VA((addr_t)req->req.buf),
 					  req->req.length);
 
-	item = req->item;
 	/* Write all TD's to memory from cache */
-	while (item != NULL) {
-		curr_item = item;
-		if (curr_item->next == TERMINATE)
-			item = NULL;
-		else
-			item =  (struct ept_queue_item *)curr_item->next;
-		arch_clean_invalidate_cache_range((addr_t) curr_item,
+	for (i = 0; i < tds_used; i++)
+		arch_clean_invalidate_cache_range((addr_t) req_td(req, i),
 					  sizeof(struct ept_queue_item));
-	}
 
 	DBG("ept%d %s queue req=%p\n", ept->num, ept->in ? "in" : "out", req);
 	writel(ept->bit, USB_ENDPTPRIME);

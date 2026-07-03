@@ -124,6 +124,90 @@ static void ums_req_complete(struct udc_request *req, unsigned actual, int statu
 }
 
 /*
+ * Async single-request USB primitives, used to pipeline storage I/O
+ * with USB DMA. @len must not exceed ums_max_usb_xfer.
+ */
+
+/* Queue a send to the host; returns 0 on success. */
+static int ums_usb_start_write(void *buf, unsigned len)
+{
+	arch_clean_invalidate_cache_range((addr_t)buf, ROUNDUP(len, CACHE_LINE));
+
+	ums_req_in->buf = (void *)PA((addr_t)buf);
+	ums_req_in->length = len;
+	ums_req_in->complete = ums_req_complete;
+
+	if (usb_if.udc_request_queue(ums_endpoints[0], ums_req_in) < 0) {
+		dprintf(CRITICAL, "UMS: usb start_write queue failed\n");
+		return -1;
+	}
+	return 0;
+}
+
+/* Wait for a queued send to finish; returns bytes sent. */
+static int ums_usb_finish_write(void)
+{
+	event_wait(&ums_txn_done);
+	return ums_req_in->length;
+}
+
+/* Queue a receive from the host; returns 0 on success. */
+static int ums_usb_start_read(void *buf, unsigned len)
+{
+	ums_req_out->buf = (void *)PA((addr_t)buf);
+	ums_req_out->length = len;
+	ums_req_out->complete = ums_req_complete;
+
+	if (usb_if.udc_request_queue(ums_endpoints[1], ums_req_out) < 0) {
+		dprintf(CRITICAL, "UMS: usb start_read queue failed\n");
+		return -1;
+	}
+	return 0;
+}
+
+/* Wait for a queued receive to finish; returns bytes received. */
+static int ums_usb_finish_read(void *buf)
+{
+	event_wait(&ums_txn_done);
+	arch_invalidate_cache_range((addr_t)buf,
+				    ROUNDUP(ums_req_out->length, CACHE_LINE));
+	return ums_req_out->length;
+}
+
+/*
+ * Throughput statistics, logged once per accumulated window so the
+ * effect of transfer-path changes can be measured over serial.
+ */
+#define UMS_STATS_WINDOW (64 * 1024 * 1024)
+
+static struct {
+	uint64_t bytes;
+	uint64_t total_mb;
+	time_t busy_ms;
+} ums_stats[2]; /* 0 = read (to host), 1 = write (from host) */
+
+static void ums_stats_update(int dir, unsigned bytes, time_t busy_ms)
+{
+	ums_stats[dir].bytes += bytes;
+	ums_stats[dir].busy_ms += busy_ms;
+
+	if (ums_stats[dir].bytes < UMS_STATS_WINDOW)
+		return;
+
+	/* bytes/ms ~= KB/s */
+	uint32_t kbps = ums_stats[dir].busy_ms ?
+		(uint32_t)(ums_stats[dir].bytes / ums_stats[dir].busy_ms) : 0;
+	ums_stats[dir].total_mb += ums_stats[dir].bytes / (1024 * 1024);
+
+	dprintf(INFO, "UMS: %s %llu MiB total, %u.%u MB/s\n",
+		dir ? "written" : "read", ums_stats[dir].total_mb,
+		kbps / 1000, (kbps % 1000) / 100);
+
+	ums_stats[dir].bytes = 0;
+	ums_stats[dir].busy_ms = 0;
+}
+
+/*
  * ums_usb_write - Send data to host, chunked to controller limits.
  * Mirrors fastboot's hsusb_usb_write() / usb30_usb_write() pattern.
  * @buf: virtual address of data buffer (must be cache-line aligned for DMA)
@@ -160,46 +244,6 @@ static int ums_usb_write(void *buf, unsigned len)
         if (ums_req_in->length != xfer)
             break;
     }
-
-    return count;
-}
-
-/*
- * ums_usb_read - Receive data from host, chunked to controller limits.
- * @buf: virtual address of receive buffer (must be cache-line aligned for DMA)
- * @len: number of bytes to receive
- * Returns bytes received, or -1 on error.
- */
-static int ums_usb_read(void *buf, unsigned len)
-{
-    unsigned char *ptr = buf;
-    unsigned xfer;
-    int count = 0;
-
-    while (len > 0) {
-        xfer = (len > ums_max_usb_xfer) ? ums_max_usb_xfer : len;
-
-        ums_req_out->buf = (void *)PA((addr_t)ptr);
-        ums_req_out->length = xfer;
-        ums_req_out->complete = ums_req_complete;
-
-        if (usb_if.udc_request_queue(ums_endpoints[1], ums_req_out) < 0) {
-            dprintf(CRITICAL, "UMS: usb_read queue failed\n");
-            return -1;
-        }
-        event_wait(&ums_txn_done);
-
-        count += ums_req_out->length;
-        ptr += ums_req_out->length;
-        len -= ums_req_out->length;
-
-        /* Short transfer */
-        if (ums_req_out->length != xfer)
-            break;
-    }
-
-    /* Invalidate cache so CPU sees DMA-written data */
-    arch_invalidate_cache_range((addr_t)buf, ROUNDUP(count, CACHE_LINE));
 
     return count;
 }
@@ -327,12 +371,37 @@ static int ums_scsi_read_capacity(struct cbw *cbw)
     return 0;
 }
 
-/* SCSI READ 10 command - chunked for large transfers */
+/*
+ * Max blocks per pipeline chunk: half the transfer buffer (double
+ * buffering) and at most one USB request per chunk.
+ */
+static uint32_t ums_chunk_blocks(void)
+{
+    unsigned half = ums_buffer_size / 2;
+
+    if (half > ums_max_usb_xfer)
+        half = ums_max_usb_xfer;
+
+    return half / g_ums_device.block_size;
+}
+
+/*
+ * SCSI READ 10 command.
+ *
+ * Double-buffered: while the USB controller is sending chunk N out of
+ * one half of the transfer buffer, chunk N+1 is read from storage into
+ * the other half, so the eMMC and USB DMA engines run concurrently.
+ */
 static int ums_scsi_read_10(struct cbw *cbw)
 {
     uint32_t lba, transfer_length, remaining, chunk_blocks;
+    uint32_t max_blocks_per_chunk;
     uint64_t offset;
-    unsigned chunk_bytes;
+    unsigned chunk_bytes, pending_bytes = 0;
+    bool pending = false;
+    uint8_t *bufs[2];
+    time_t start_ms;
+    int cur = 0;
     int ret;
 
     if (!g_ums_device.is_mounted || !g_ums_device.bio_dev) {
@@ -352,8 +421,10 @@ static int ums_scsi_read_10(struct cbw *cbw)
         return -1;
     }
 
-    /* Max blocks that fit in our transfer buffer */
-    uint32_t max_blocks_per_chunk = ums_buffer_size / g_ums_device.block_size;
+    max_blocks_per_chunk = ums_chunk_blocks();
+    bufs[0] = g_ums_device.transfer_buffer;
+    bufs[1] = bufs[0] + ums_buffer_size / 2;
+    start_ms = current_time();
 
     remaining = transfer_length;
     while (remaining > 0) {
@@ -361,35 +432,62 @@ static int ums_scsi_read_10(struct cbw *cbw)
         chunk_bytes = chunk_blocks * g_ums_device.block_size;
         offset = (uint64_t)lba * g_ums_device.block_size;
 
-        /* Read from storage into transfer buffer */
-        ret = bio_read(g_ums_device.bio_dev, g_ums_device.transfer_buffer,
-                       offset, chunk_bytes);
+        /* Read from storage while USB sends the previous chunk */
+        ret = bio_read(g_ums_device.bio_dev, bufs[cur], offset, chunk_bytes);
         if (ret < 0) {
             dprintf(CRITICAL, "UMS: bio_read failed at LBA %u: %d\n", lba, ret);
+            if (pending)
+                ums_usb_finish_write();
             ums_set_sense(SCSI_SENSE_MEDIUM_ERROR, 0, 0);
             return -1;
         }
 
-        /* Send chunk to host via chunked USB write */
-        ret = ums_usb_write(g_ums_device.transfer_buffer, chunk_bytes);
+        if (pending) {
+            /* Short transfer means the host stopped early */
+            if (ums_usb_finish_write() != (int)pending_bytes)
+                return 0;
+            pending = false;
+        }
+
+        ret = ums_usb_start_write(bufs[cur], chunk_bytes);
         if (ret < 0) {
             dprintf(CRITICAL, "UMS: usb_write failed at LBA %u\n", lba);
             return -1;
         }
+        pending = true;
+        pending_bytes = chunk_bytes;
 
+        cur ^= 1;
         lba += chunk_blocks;
         remaining -= chunk_blocks;
     }
 
+    if (pending)
+        ums_usb_finish_write();
+
+    ums_stats_update(0, transfer_length * g_ums_device.block_size,
+                     current_time() - start_ms);
+
     return 0;
 }
 
-/* SCSI WRITE 10 command - chunked for large transfers */
+/*
+ * SCSI WRITE 10 command.
+ *
+ * Double-buffered: while chunk N is written to storage from one half
+ * of the transfer buffer, the USB controller receives chunk N+1 into
+ * the other half.
+ */
 static int ums_scsi_write_10(struct cbw *cbw)
 {
-    uint32_t lba, transfer_length, remaining, chunk_blocks;
+    uint32_t lba, transfer_length, remaining, chunk_blocks, next_blocks;
+    uint32_t max_blocks_per_chunk;
     uint64_t offset;
     unsigned chunk_bytes;
+    bool pending;
+    uint8_t *bufs[2];
+    time_t start_ms;
+    int cur = 0;
     int ret;
 
     if (!g_ums_device.is_mounted || !g_ums_device.bio_dev) {
@@ -414,34 +512,64 @@ static int ums_scsi_write_10(struct cbw *cbw)
         return -1;
     }
 
-    /* Max blocks that fit in our transfer buffer */
-    uint32_t max_blocks_per_chunk = ums_buffer_size / g_ums_device.block_size;
+    max_blocks_per_chunk = ums_chunk_blocks();
+    bufs[0] = g_ums_device.transfer_buffer;
+    bufs[1] = bufs[0] + ums_buffer_size / 2;
+    start_ms = current_time();
 
     remaining = transfer_length;
+
+    /* Prime the pipeline: receive the first chunk */
+    chunk_blocks = (remaining > max_blocks_per_chunk) ? max_blocks_per_chunk : remaining;
+    ret = ums_usb_start_read(bufs[cur], chunk_blocks * g_ums_device.block_size);
+    if (ret < 0)
+        return -1;
+    pending = true;
+
     while (remaining > 0) {
         chunk_blocks = (remaining > max_blocks_per_chunk) ? max_blocks_per_chunk : remaining;
         chunk_bytes = chunk_blocks * g_ums_device.block_size;
 
-        /* Receive chunk from host via chunked USB read */
-        ret = ums_usb_read(g_ums_device.transfer_buffer, chunk_bytes);
-        if (ret < 0) {
-            dprintf(CRITICAL, "UMS: usb_read failed at LBA %u\n", lba);
+        /* Wait for the chunk the host is sending into bufs[cur] */
+        ret = ums_usb_finish_read(bufs[cur]);
+        pending = false;
+        if (ret != (int)chunk_bytes) {
+            dprintf(CRITICAL, "UMS: short usb_read at LBA %u (%d/%u)\n",
+                    lba, ret, chunk_bytes);
             return -1;
+        }
+
+        /* Receive the next chunk while this one goes to storage */
+        next_blocks = remaining - chunk_blocks;
+        if (next_blocks > max_blocks_per_chunk)
+            next_blocks = max_blocks_per_chunk;
+        if (next_blocks > 0) {
+            ret = ums_usb_start_read(bufs[cur ^ 1],
+                                     next_blocks * g_ums_device.block_size);
+            if (ret < 0)
+                return -1;
+            pending = true;
         }
 
         /* Write to storage */
         offset = (uint64_t)lba * g_ums_device.block_size;
-        ret = bio_write(g_ums_device.bio_dev, g_ums_device.transfer_buffer,
-                        offset, chunk_bytes);
+        ret = bio_write(g_ums_device.bio_dev, bufs[cur], offset, chunk_bytes);
         if (ret < 0) {
             dprintf(CRITICAL, "UMS: bio_write failed at LBA %u: %d\n", lba, ret);
+            /* Absorb the queued receive so it can't swallow the next CBW */
+            if (pending)
+                ums_usb_finish_read(bufs[cur ^ 1]);
             ums_set_sense(SCSI_SENSE_MEDIUM_ERROR, 0, 0);
             return -1;
         }
 
+        cur ^= 1;
         lba += chunk_blocks;
         remaining -= chunk_blocks;
     }
+
+    ums_stats_update(1, transfer_length * g_ums_device.block_size,
+                     current_time() - start_ms);
 
     return 0;
 }
