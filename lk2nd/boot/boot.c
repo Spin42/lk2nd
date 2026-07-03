@@ -71,6 +71,13 @@ static void lk2nd_scan_devices(void)
 				char slot = lk2nd_boot_ab_get_slot();
 				target_offset = lk2nd_boot_ab_get_offset();
 
+				/* A slot without a configured offset would map to
+				 * block 0 (the env area), not a boot filesystem. */
+				if (target_offset == 0) {
+					dprintf(CRITICAL, "boot: No offset configured for slot %c, skipping\n", slot);
+					continue;
+				}
+
 				bdev_t *parent_bdev = bio_open(base_device);
 				if (!parent_bdev) {
 					dprintf(CRITICAL, "boot: Failed to open base device '%s'\n", base_device);
@@ -108,10 +115,12 @@ static void lk2nd_scan_devices(void)
 
 				lk2nd_try_extlinux(mountpoint);
 
-				dprintf(INFO, "boot: Slot %c did not boot, trying next slot\n", slot);
+				dprintf(CRITICAL, "boot: Slot %c did not boot\n", slot);
 				fs_unmount(mountpoint);
 
 			} while (lk2nd_boot_ab_advance_slot());
+
+			dprintf(CRITICAL, "boot: No A/B slot booted. Reverting to android boot.\n");
 
 		} else {
 			/* No offset: just mount the base device directly */
@@ -124,6 +133,8 @@ static void lk2nd_scan_devices(void)
 					lk2nd_print_file_tree(mountpoint, " ");
 				}
 				lk2nd_try_extlinux(mountpoint);
+			} else {
+				dprintf(CRITICAL, "boot: Failed to mount base device '%s'\n", base_device);
 			}
 		}
 		return;

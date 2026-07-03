@@ -2,6 +2,7 @@
 #ifndef LK2ND_BOOT_AB_H
 #define LK2ND_BOOT_AB_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <sys/types.h>
 
@@ -16,7 +17,8 @@
 /* Initialize A/B boot system with U-Boot environment location */
 void lk2nd_boot_ab_init(const char *partition, uint64_t offset, size_t size);
 
-/* Get current active boot slot (A or B) based on BOOT_ORDER and counters */
+/* Get current active boot slot ('A'/'B') based on BOOT_ORDER and counters,
+ * or '\0' if A/B is not initialized */
 char lk2nd_boot_ab_get_slot(void);
 
 /* Pre-boot handler: decrement boot counter before boot attempt */
