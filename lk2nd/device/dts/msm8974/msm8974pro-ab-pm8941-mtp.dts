@@ -24,6 +24,7 @@
 		lk2nd,match-panel;
 
 		lk2nd,dtb-files = "msm8974pro-fairphone-fp2";
+		lk2nd,sd-mmc = <&sdhc2>;
 
 		gpio-keys {
 			compatible = "gpio-keys";
@@ -54,6 +55,7 @@
 		lk2nd,match-cmdline = "*androidboot.emmc=true*";
 
 		lk2nd,dtb-files = "msm8974pro-fairphone-fp2";
+		lk2nd,sd-mmc = <&sdhc2>;
 
 		gpio-keys {
 			compatible = "gpio-keys";

@@ -22,6 +22,41 @@
 #define str(s) #s
 
 /**
+ * lk2nd_try_boot_bdev() - Mount a partition and try to boot from it.
+ *
+ * Returns only if no kernel was launched.
+ */
+static void lk2nd_try_boot_bdev(bdev_t *bdev)
+{
+	char mountpoint[128];
+	int ret;
+
+	/*
+	 * Skip partitions that are too small to have a boot fs on.
+	 *
+	 * 'boot' partition is explicitly allowed to have a small fs on it
+	 * in case one installs next stage bootloader package (i.e. u-boot)
+	 * there but still wants to make use of lk2nd's device database.
+	 */
+	if (bdev->size < LK2ND_BOOT_MIN_SIZE &&
+	    !(bdev->label && !strncmp(bdev->label, "boot", strlen("boot"))))
+		return;
+
+	snprintf(mountpoint, sizeof(mountpoint), "/%s", bdev->name);
+	ret = fs_mount(mountpoint, "ext2", bdev->name);
+	if (ret < 0)
+		return;
+
+	if (DEBUGLEVEL >= SPEW) {
+		dprintf(SPEW, "Scanning %s ...\n", bdev->name);
+		dprintf(SPEW, "%s\n", mountpoint);
+		lk2nd_print_file_tree(mountpoint, " ");
+	}
+
+	lk2nd_try_extlinux(mountpoint);
+}
+
+/**
  * lk2nd_scan_devices() - Scan filesystems and try to boot
  */
 static void lk2nd_scan_devices(void)
@@ -33,6 +68,29 @@ static void lk2nd_scan_devices(void)
 	const char *base_device = NULL;
 	uint64_t target_offset = 0;
 	char subdev_name[64];
+	bool sd_tried = false;
+
+	dprintf(INFO, "boot: Trying to boot from the file system...\n");
+
+	/*
+	 * SD card pass: external SD partitions are registered as mmcXpN
+	 * (eMMC partitions use the wrp0pN wrapper). Try them before the
+	 * eMMC so an inserted bootable card always takes precedence.
+	 */
+	list_for_every_entry(&bdevs->list, bdev, bdev_t, node) {
+		if (!bdev->is_leaf || strncmp(bdev->name, "mmc", 3))
+			continue;
+
+		if (!sd_tried) {
+			dprintf(INFO, "boot: SD card detected, trying it first\n");
+			sd_tried = true;
+		}
+
+		lk2nd_try_boot_bdev(bdev);
+	}
+
+	if (sd_tried)
+		dprintf(INFO, "boot: SD card did not boot, falling back to eMMC\n");
 
 #ifdef LK2ND_AB_BOOT
 	/* Early A/B bootstrap: the env location comes from the LK2ND_AB_*
@@ -46,8 +104,6 @@ static void lk2nd_scan_devices(void)
 		lk2nd_boot_ab_init(xstr(LK2ND_AB_ENV_PART), LK2ND_AB_ENV_OFFSET, LK2ND_AB_ENV_SIZE);
 	}
 #endif
-
-	dprintf(INFO, "boot: Trying to boot from the file system...\n");
 
 	/* Check if A/B boot is configured: base device is the U-Boot env partition */
 	base_device = lk2nd_boot_ab_get_base_device();
@@ -149,32 +205,11 @@ static void lk2nd_scan_devices(void)
 		if (!bdev->is_leaf)
 			continue;
 
-		/* In non-A/B mode we scan all partitions; otherwise we already tried direct mount */
-
-		/*
-		 * Skip partitions that are too small to have a boot fs on.
-		 *
-		 * 'boot' partition is explicitly allowed to have a small fs on it
-		 * in case one installs next stage bootloader package (i.e. u-boot)
-		 * there but still wants to make use of lk2nd's device database.
-		 */
-		if (bdev->size < LK2ND_BOOT_MIN_SIZE &&
-		    !(bdev->label && !strncmp(bdev->label, "boot", strlen("boot"))))
+		/* SD partitions were already tried in the first pass. */
+		if (!strncmp(bdev->name, "mmc", 3))
 			continue;
 
-		snprintf(mountpoint, sizeof(mountpoint), "/%s", bdev->name);
-		ret = fs_mount(mountpoint, "ext2", bdev->name);
-		if (ret < 0)
-			continue;
-
-		if (DEBUGLEVEL >= SPEW) {
-			dprintf(SPEW, "Scanning %s ...\n", bdev->name);
-			dprintf(SPEW, "%s\n", mountpoint);
-			lk2nd_print_file_tree(mountpoint, " ");
-		}
-
-		lk2nd_try_extlinux(mountpoint);
-
+		lk2nd_try_boot_bdev(bdev);
 	}
 
 	dprintf(INFO, "boot: Bootable file system not found. Reverting to android boot.\n");
