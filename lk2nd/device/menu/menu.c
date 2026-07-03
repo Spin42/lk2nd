@@ -55,14 +55,31 @@ static void display_serial_menu(void);
 extern void _serial_putc(char c);
 extern volatile int debug_uart_suppress;
 
-static void serial_puts(const char *s)
+/*
+ * Frame buffer for the serial menu.
+ *
+ * All drawing is composed into a RAM buffer and emitted to the UART in
+ * one burst by frame_flush().  This keeps every screen update (and the
+ * VT100 escape sequences within it) contiguous on the wire, so a frame
+ * can never be torn apart by other output.
+ */
+
+static char frame_buf[2048];
+static size_t frame_len;
+
+static void frame_reset(void)
 {
-	while (*s)
-		_serial_putc(*s++);
+	frame_len = 0;
 }
 
-static void serial_printf(const char *fmt, ...) __PRINTFLIKE(1, 2);
-static void serial_printf(const char *fmt, ...)
+static void frame_puts(const char *s)
+{
+	while (*s && frame_len < sizeof(frame_buf) - 1)
+		frame_buf[frame_len++] = *s++;
+}
+
+static void frame_printf(const char *fmt, ...) __PRINTFLIKE(1, 2);
+static void frame_printf(const char *fmt, ...)
 {
 	char buf[128];
 	va_list ap;
@@ -70,33 +87,36 @@ static void serial_printf(const char *fmt, ...)
 	va_start(ap, fmt);
 	vsnprintf(buf, sizeof(buf), fmt, ap);
 	va_end(ap);
-	serial_puts(buf);
+	frame_puts(buf);
+}
+
+static void frame_flush(void)
+{
+	size_t i;
+
+	for (i = 0; i < frame_len; i++)
+		_serial_putc(frame_buf[i]);
+	frame_len = 0;
 }
 
 /*
- * VT100 escape helpers for in-place terminal updates.
- *
- * These work on any terminal emulator (minicom, picocom, screen, PuTTY,
- * the Linux console, etc.).  They emit raw escape sequences directly to
- * the UART so background dprintf output cannot interleave.
+ * VT100 escape helpers for in-place terminal updates, composed into the
+ * frame buffer.  These work on any terminal emulator (minicom, picocom,
+ * screen, PuTTY, the Linux console, etc.).
  */
 
-/* Save / restore cursor position */
-#define VT_SAVE_CURSOR()      serial_puts("\033[s")
-#define VT_RESTORE_CURSOR()   serial_puts("\033[u")
-
 /* Move cursor to row,col (1-based) */
-#define VT_GOTO(row, col)     serial_printf("\033[%d;%dH", (row), (col))
+#define VT_GOTO(row, col)     frame_printf("\033[%d;%dH", (row), (col))
 
 /* Clear from cursor to end of line */
-#define VT_CLEAR_EOL()        serial_puts("\033[K")
+#define VT_CLEAR_EOL()        frame_puts("\033[K")
 
 /* Clear entire screen and home cursor */
-#define VT_CLEAR_SCREEN()     serial_puts("\033[2J\033[H")
+#define VT_CLEAR_SCREEN()     frame_puts("\033[2J\033[H")
 
 /* Hide / show cursor */
-#define VT_HIDE_CURSOR()      serial_puts("\033[?25l")
-#define VT_SHOW_CURSOR()      serial_puts("\033[?25h")
+#define VT_HIDE_CURSOR()      frame_puts("\033[?25l")
+#define VT_SHOW_CURSOR()      frame_puts("\033[?25h")
 
 static void fbcon_puts(const char *str, unsigned type, int y, bool center)
 {
@@ -425,25 +445,35 @@ void display_default_image_on_screen(void)
  *   6  ARM64
  *   7  (optional: panel / battery / bootloader)
  *   .. ---- separator
- *   .. (blank)
  *   .. menu item 1          <- menu_start_row
  *   .. menu item 2
  *   ..   ...
  *   .. menu item N
- *   .. (blank)
  *   .. ---- separator
  *   .. help text
- *   .. ---- separator
+ *   .. status               <- status_row(), bottom-most row used
  *
  * The actual row numbers are computed dynamically so the header can
  * include a variable number of device-info lines.
+ *
+ * The layout must fit the smallest common terminal: minicom in an
+ * 80x24 window only offers 23 lines (the bottom one is its status
+ * bar).  Worst case here is 10 header rows + 7 options + 3 = 20 rows.
+ * Cursor addressing past the terminal height gets clamped to the last
+ * line and rows silently overwrite each other, which looks like a
+ * corrupted menu.
  */
 
 /* First row where menu items start; set during header draw */
 static int menu_start_row;
 
+static int status_row(void)
+{
+	return menu_start_row + (int)NUM_OPTIONS + 2;
+}
+
 /**
- * serial_draw_header() - Draw the static header (once).
+ * serial_draw_header() - Compose the static header into the frame.
  *
  * Returns the next available row after the header.
  */
@@ -456,62 +486,59 @@ static int serial_draw_header(void)
 	VT_HIDE_CURSOR();
 
 	VT_GOTO(row, 1);
-	serial_puts("----------------------------------------------");
+	frame_puts("----------------------------------------------");
 	row++;
 
 	VT_GOTO(row, 1);
-	serial_printf("  lk2nd Boot Menu  [%s]", xstr(BOARD));
+	frame_printf("  lk2nd Boot Menu  [%s]", xstr(BOARD));
 	row++;
 
 	VT_GOTO(row, 1);
-	serial_puts("----------------------------------------------");
+	frame_puts("----------------------------------------------");
 	row++;
 
 	VT_GOTO(row, 1);
-	serial_printf("  Version : %s", LK2ND_VERSION);
+	frame_printf("  Version : %s", LK2ND_VERSION);
 	row++;
 
 	VT_GOTO(row, 1);
 	if (lk2nd_dev.model)
-		serial_printf("  Device  : %s", lk2nd_dev.model);
+		frame_printf("  Device  : %s", lk2nd_dev.model);
 	else
-		serial_puts("  Device  : Unknown");
+		frame_puts("  Device  : Unknown");
 	row++;
 
 	VT_GOTO(row, 1);
-	serial_printf("  ARM64   : %s", armv8 ? "yes" : "no");
+	frame_printf("  ARM64   : %s", armv8 ? "yes" : "no");
 	row++;
 
 	if (lk2nd_dev.panel.name) {
 		VT_GOTO(row, 1);
-		serial_printf("  Panel   : %s", lk2nd_dev.panel.name);
+		frame_printf("  Panel   : %s", lk2nd_dev.panel.name);
 		row++;
 	}
 	if (lk2nd_dev.battery) {
 		VT_GOTO(row, 1);
-		serial_printf("  Battery : %s", lk2nd_dev.battery);
+		frame_printf("  Battery : %s", lk2nd_dev.battery);
 		row++;
 	}
 #if WITH_LK2ND_DEVICE_2ND
 	if (lk2nd_dev.bootloader) {
 		VT_GOTO(row, 1);
-		serial_printf("  Loader  : %s", lk2nd_dev.bootloader);
+		frame_printf("  Loader  : %s", lk2nd_dev.bootloader);
 		row++;
 	}
 #endif
 
 	VT_GOTO(row, 1);
-	serial_puts("----------------------------------------------");
-	row++;
-
-	/* Blank line before menu */
+	frame_puts("----------------------------------------------");
 	row++;
 
 	return row;
 }
 
 /**
- * serial_draw_option() - Draw a single menu option at its row.
+ * serial_draw_option() - Compose a single menu option at its row.
  */
 static void serial_draw_option(unsigned int idx, bool selected)
 {
@@ -519,9 +546,9 @@ static void serial_draw_option(unsigned int idx, bool selected)
 	VT_CLEAR_EOL();
 
 	if (selected)
-		serial_printf("  > %d. %s", idx + 1, menu_options[idx].name);
+		frame_printf("  > %d. %s", idx + 1, menu_options[idx].name);
 	else
-		serial_printf("    %d. %s", idx + 1, menu_options[idx].name);
+		frame_printf("    %d. %s", idx + 1, menu_options[idx].name);
 }
 
 /**
@@ -536,36 +563,45 @@ static void serial_draw_all_options(unsigned int sel)
 }
 
 /**
- * serial_draw_footer() - Draw the help text below the menu.
+ * serial_draw_footer() - Compose the help text below the menu.
  */
 static void serial_draw_footer(void)
 {
-	int row = menu_start_row + (int)NUM_OPTIONS + 1;
+	int row = menu_start_row + (int)NUM_OPTIONS;
 
 	VT_GOTO(row, 1);
-	serial_puts("----------------------------------------------");
+	frame_puts("----------------------------------------------");
 	row++;
 	VT_GOTO(row, 1);
-	serial_puts("  Arrows/u/d: navigate   Enter: select");
-	row++;
-	VT_GOTO(row, 1);
-	serial_puts("  1-9: jump to option    q: quit");
-	row++;
-	VT_GOTO(row, 1);
-	serial_puts("----------------------------------------------");
+	frame_puts("  Arrows/u/d navigate  Enter select  1-9 jump  q quit");
 }
 
 /**
- * serial_draw_status() - Show a transient status message below the footer.
+ * serial_draw_status() - Compose a transient status message below the help.
  */
 static void serial_draw_status(const char *msg)
 {
-	int row = menu_start_row + (int)NUM_OPTIONS + 6;
-
-	VT_GOTO(row, 1);
+	VT_GOTO(status_row(), 1);
 	VT_CLEAR_EOL();
 	if (msg)
-		serial_printf("  %s", msg);
+		frame_printf("  %s", msg);
+}
+
+/**
+ * serial_menu_suspend() - Hand the terminal back for regular output.
+ *
+ * Parks the cursor on a fresh line below everything the menu drew and
+ * re-enables background dprintf output, so whatever prints next scrolls
+ * cleanly instead of landing in the middle of the menu.
+ */
+static void serial_menu_suspend(void)
+{
+	VT_GOTO(status_row(), 1);
+	VT_SHOW_CURSOR();
+	frame_puts("\r\n");
+	frame_flush();
+
+	debug_uart_suppress = 0;
 }
 
 /**
@@ -600,11 +636,13 @@ static void display_serial_menu(void)
 	 */
 	debug_uart_suppress = 1;
 
-	/* Draw the complete screen once */
+	/* Draw the complete screen as one frame */
+	frame_reset();
 	menu_start_row = serial_draw_header();
 	serial_draw_all_options(sel);
 	serial_draw_footer();
 	serial_draw_status(NULL);
+	frame_flush();
 
 	for (;;) {
 		char c = serial_getc_blocking();
@@ -669,12 +707,13 @@ nav_down:
 
 		case '\r':
 		case '\n':
-			serial_draw_status(NULL);
+			frame_reset();
 			serial_draw_option(sel, true);
+			frame_flush();
 
-			/* Unsuppress output before running the action */
-			VT_SHOW_CURSOR();
-			debug_uart_suppress = 0;
+			/* Hand the terminal back before running the action */
+			frame_reset();
+			serial_menu_suspend();
 
 			dprintf(INFO, "Menu: executing '%s'\n",
 				menu_options[sel].name);
@@ -685,18 +724,19 @@ nav_down:
 			 * and redraw.
 			 */
 			debug_uart_suppress = 1;
+			frame_reset();
 			menu_start_row = serial_draw_header();
 			serial_draw_all_options(sel);
 			serial_draw_footer();
 			serial_draw_status("Returned from action");
+			frame_flush();
 			continue;
 
 		case 'q':
 		case 'Q':
 			/* Restore terminal state and unsuppress */
-			VT_SHOW_CURSOR();
-			serial_draw_status(NULL);
-			debug_uart_suppress = 0;
+			frame_reset();
+			serial_menu_suspend();
 			dprintf(INFO, "Menu: exiting\n");
 			return;
 
@@ -707,28 +747,32 @@ nav_down:
 				sel = choice;
 
 				/* Redraw the changed lines */
+				frame_reset();
 				if (old_sel != sel) {
 					serial_draw_option(old_sel, false);
 					serial_draw_option(sel, true);
 				}
+				frame_flush();
 
-				serial_draw_status(NULL);
-
-				/* Unsuppress and run */
-				VT_SHOW_CURSOR();
-				debug_uart_suppress = 0;
+				/* Hand the terminal back and run */
+				frame_reset();
+				serial_menu_suspend();
 
 				dprintf(INFO, "Menu: executing '%s'\n",
 					menu_options[sel].name);
 				menu_options[sel].action();
 
 				debug_uart_suppress = 1;
+				frame_reset();
 				menu_start_row = serial_draw_header();
 				serial_draw_all_options(sel);
 				serial_draw_footer();
 				serial_draw_status("Returned from action");
+				frame_flush();
 			} else {
+				frame_reset();
 				serial_draw_status("Invalid option");
+				frame_flush();
 			}
 			continue;
 		}
@@ -738,11 +782,13 @@ nav_down:
 			continue;
 		}
 
-		/* Only update the two lines that changed */
+		/* Only update the two lines that changed, as one frame */
 		if (old_sel != sel) {
+			frame_reset();
 			serial_draw_option(old_sel, false);
 			serial_draw_option(sel, true);
 			serial_draw_status(NULL);
+			frame_flush();
 		}
 	}
 }
