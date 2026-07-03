@@ -23,6 +23,7 @@
 #include <lk2nd/boot.h>
 #include <lk2nd/device/menu.h>
 #include <lk2nd/hw/bdev.h>
+#include <lk2nd/ramoops.h>
 #include <lk2nd/version.h>
 
 #include "../device.h"
@@ -281,10 +282,20 @@ static int cmd_boot(int argc, char **argv)
 	return -1;
 }
 
-static int cmd_continue_(int argc, char **argv)
+static int cmd_pstore(int argc, char **argv)
 {
-	printf("continuing android boot...\n");
-	cmd_continue(NULL, NULL, 0);
+	if (argc < 2)
+		lk2nd_ramoops_print_summary();
+	else if (!strcmp(argv[1], "console"))
+		lk2nd_ramoops_print_console();
+	else if (!strcmp(argv[1], "dump"))
+		lk2nd_ramoops_print_dumps();
+	else if (!strcmp(argv[1], "zap"))
+		lk2nd_ramoops_zap();
+	else {
+		printf("usage: pstore [console|dump|zap]\n");
+		return -1;
+	}
 	return 0;
 }
 
@@ -403,8 +414,8 @@ static const struct shell_cmd shell_cmds[] = {
 	{ "saveenv",  "write environment to storage",               cmd_saveenv },
 	{ "slot",     "show A/B boot state",                        cmd_slot },
 	{ "boot",     "scan file systems and boot",                 cmd_boot },
-	{ "continue", "continue android boot",                      cmd_continue_ },
 	{ "part",     "list block devices",                         cmd_part },
+	{ "pstore",   "[console|dump|zap] - ramoops crash logs",    cmd_pstore },
 	{ "ls",       "<device> - list files on a device",          cmd_ls },
 	{ "md",       "<hex-addr> [count] - display memory",        cmd_md },
 #ifdef LK2ND_UMS

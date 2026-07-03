@@ -6,9 +6,12 @@
 #include <debug.h>
 #include <fastboot.h>
 #include <libfdt.h>
+#include <printf.h>
+#include <string.h>
 #include <target.h>
 #include <zlib.h>
 
+#include <lk2nd/ramoops.h>
 #include <lk2nd/util/cmdline.h>
 
 #define PERSISTENT_RAM_SIG (0x43474244) /* DBGC */
@@ -244,3 +247,131 @@ static void cmd_oem_ramoops_dump(const char *arg, void *data, unsigned sz)
 	fastboot_stage(scratch, size);
 }
 FASTBOOT_REGISTER("oem ramoops dump", cmd_oem_ramoops_dump);
+
+/*
+ * Serial-console access for the shell ('pstore' command).
+ */
+
+/* Print text, skipping non-printable bytes (records have no ECC) */
+static void ramoops_print_text(const uint8_t *data, size_t len)
+{
+	size_t i;
+
+	for (i = 0; i < len; i++) {
+		char c = data[i];
+
+		if (c == '\n' || c == '\t' || (c >= 0x20 && c < 0x7f))
+			printf("%c", c);
+	}
+	printf("\n");
+}
+
+void lk2nd_ramoops_print_summary(void)
+{
+	struct ramoops_region region;
+	struct pram_buf *record;
+	uint8_t *record_base;
+	unsigned int i, count;
+
+	get_ramoops_region(&region);
+
+	printf("ramoops region: %u KiB @ %p\n",
+	       region.size / 1024, region.base);
+
+	record_base = region.base;
+	count = region.dump_size / region.record_size;
+	for (i = 0; i < count; i++) {
+		record = (struct pram_buf *)record_base;
+		if (record->sig == PERSISTENT_RAM_SIG && record->size)
+			printf("  dump %u: %u bytes\n", i, record->size);
+		record_base += region.record_size;
+	}
+
+	record = (struct pram_buf *)((uint8_t *)region.base + region.dump_size);
+	if (record->sig == PERSISTENT_RAM_SIG && record->size)
+		printf("  console: %u bytes\n", record->size);
+}
+
+void lk2nd_ramoops_print_console(void)
+{
+	struct ramoops_region region;
+	struct pram_buf *record;
+	size_t cap, size, start;
+
+	get_ramoops_region(&region);
+
+	record = (struct pram_buf *)((uint8_t *)region.base + region.dump_size);
+	if (record->sig != PERSISTENT_RAM_SIG || !record->size) {
+		printf("no console record\n");
+		return;
+	}
+
+	cap = region.console_size - sizeof(*record);
+	size = (record->size > cap) ? cap : record->size;
+	start = record->offt % cap;
+
+	/* The console record is a ring buffer ending at 'offt' */
+	if (size >= cap) {
+		ramoops_print_text(record->data + start, cap - start);
+		ramoops_print_text(record->data, start);
+	} else {
+		ramoops_print_text(record->data, size);
+	}
+}
+
+void lk2nd_ramoops_print_dumps(void)
+{
+	unsigned long scratch_size;
+	struct ramoops_region region;
+	struct pram_buf *record;
+	struct kmsg_hdr *header;
+	uint8_t *record_base, *scratch;
+	unsigned int i, count;
+	size_t len;
+	int found = 0;
+
+	get_ramoops_region(&region);
+
+	record_base = region.base;
+	count = region.dump_size / region.record_size;
+	for (i = 0; i < count; i++, record_base += region.record_size) {
+		record = (struct pram_buf *)record_base;
+		if (record->sig != PERSISTENT_RAM_SIG || !record->size)
+			continue;
+
+		header = (struct kmsg_hdr *)record->data;
+		if (header->magic != RAMOOPS_KERNMSG_HDR)
+			continue;
+
+		found = 1;
+		printf("--- dump %u (%.17s) ---\n", i, header->time);
+
+		if (header->compressed == 'C') {
+			/* Decompress into the scratch region, like
+			 * cmd_oem_ramoops_dump does */
+			scratch = target_get_scratch_address();
+			scratch_size = target_get_max_flash_size();
+			if (uncompress(scratch, &scratch_size, header->data,
+				       record->size) != Z_OK) {
+				printf("(decompression failed)\n");
+				continue;
+			}
+			ramoops_print_text(scratch, scratch_size);
+		} else {
+			len = record->size - sizeof(*header);
+			ramoops_print_text(header->data, len);
+		}
+	}
+
+	if (!found)
+		printf("no dump records\n");
+}
+
+void lk2nd_ramoops_zap(void)
+{
+	struct ramoops_region region;
+
+	get_ramoops_region(&region);
+	memset(region.base, 0, region.size);
+	printf("ramoops region cleared\n");
+}
