@@ -22,6 +22,25 @@
 #define str(s) #s
 
 /**
+ * lk2nd_mount() - Mount a device on mountpoint, trying all supported
+ * filesystems (ext2/3/4 and FAT).
+ */
+static int lk2nd_mount(const char *mountpoint, const char *device)
+{
+	static const char * const filesystems[] = { "ext2", "fat" };
+	unsigned int i;
+	int ret = -1;
+
+	for (i = 0; i < ARRAY_SIZE(filesystems); i++) {
+		ret = fs_mount(mountpoint, filesystems[i], device);
+		if (ret >= 0)
+			return ret;
+	}
+
+	return ret;
+}
+
+/**
  * lk2nd_try_boot_bdev() - Mount a partition and try to boot from it.
  *
  * Returns only if no kernel was launched.
@@ -43,7 +62,7 @@ static void lk2nd_try_boot_bdev(bdev_t *bdev)
 		return;
 
 	snprintf(mountpoint, sizeof(mountpoint), "/%s", bdev->name);
-	ret = fs_mount(mountpoint, "ext2", bdev->name);
+	ret = lk2nd_mount(mountpoint, bdev->name);
 	if (ret < 0)
 		return;
 
@@ -160,7 +179,7 @@ static void lk2nd_scan_devices(void)
 					slot, subdev_name, (unsigned)start_block);
 
 				snprintf(mountpoint, sizeof(mountpoint), "/%s", subdev_name);
-				ret = fs_mount(mountpoint, "ext2", subdev_name);
+				ret = lk2nd_mount(mountpoint, subdev_name);
 				if (ret < 0) {
 					dprintf(CRITICAL, "boot: Failed to mount slot %c subdevice '%s'\n", slot, subdev_name);
 					continue;
@@ -183,7 +202,7 @@ static void lk2nd_scan_devices(void)
 		} else {
 			/* No offset: just mount the base device directly */
 			snprintf(mountpoint, sizeof(mountpoint), "/%s", base_device);
-			ret = fs_mount(mountpoint, "ext2", base_device);
+			ret = lk2nd_mount(mountpoint, base_device);
 			if (ret >= 0) {
 				if (DEBUGLEVEL >= SPEW) {
 					dprintf(SPEW, "Scanning %s ...\n", base_device);
