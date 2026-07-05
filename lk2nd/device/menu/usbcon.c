@@ -27,11 +27,29 @@
 #include <kernel/event.h>
 #include <kernel/thread.h>
 #include <dev/udc.h>
+#ifdef USB30_SUPPORT
+#include <usb30_udc.h>
+#endif
 #include <arch/ops.h>
 #include <arch/defines.h>
 #include <stdbool.h>
 
 #include <lk2nd/device/menu.h>
+
+/* Controller abstraction (hsusb vs dwc), same pattern as UMS/fastboot */
+typedef struct {
+	int (*udc_init)(struct udc_device *devinfo);
+	int (*udc_register_gadget)(struct udc_gadget *gadget);
+	int (*udc_start)(void);
+	int (*udc_stop)(void);
+	struct udc_endpoint *(*udc_endpoint_alloc)(unsigned type, unsigned maxpkt);
+	void (*udc_endpoint_free)(struct udc_endpoint *ept);
+	struct udc_request *(*udc_request_alloc)(void);
+	void (*udc_request_free)(struct udc_request *req);
+	int (*udc_request_queue)(struct udc_endpoint *ept, struct udc_request *req);
+} usbcon_usb_if_t;
+
+static usbcon_usb_if_t usb_if;
 
 #define USBCON_TX_RING  1024
 #define USBCON_TX_CHUNK 512
@@ -67,6 +85,7 @@ static struct udc_device usbcon_udc_device = {
 
 static void usbcon_notify(struct udc_gadget *gadget, unsigned event)
 {
+	dprintf(INFO, "usbcon: event %u\n", event);
 	if (event == UDC_EVENT_ONLINE)
 		usbcon_online = true;
 	else if (event == UDC_EVENT_OFFLINE)
@@ -117,7 +136,7 @@ static void usbcon_tx_flush(void)
 	usbcon_req_in->complete = usbcon_tx_complete;
 
 	tx_pending = true;
-	if (udc_request_queue(usbcon_endpoints[0], usbcon_req_in) < 0)
+	if (usb_if.udc_request_queue(usbcon_endpoints[0], usbcon_req_in) < 0)
 		tx_pending = false;
 }
 
@@ -181,7 +200,7 @@ int lk2nd_usbcon_getc(char *c)
 		usbcon_req_out->complete = usbcon_rx_complete;
 
 		rx_queued = true;
-		if (udc_request_queue(usbcon_endpoints[1], usbcon_req_out) < 0)
+		if (usb_if.udc_request_queue(usbcon_endpoints[1], usbcon_req_out) < 0)
 			rx_queued = false;
 	}
 
@@ -196,30 +215,65 @@ int lk2nd_usbcon_start(void)
 	if (usbcon_up)
 		return 0;
 
-	/* Only the HSUSB (chipidea) controller is supported for now */
-	if (!strcmp(target_usb_controller(), "dwc"))
+	/* Select the controller implementation (dwc vs hsusb) */
+	if (!strcmp(target_usb_controller(), "dwc")) {
+#ifdef USB30_SUPPORT
+		usbcon_udc_device.t_usb_if = target_usb30_init();
+		usb_if.udc_init            = usb30_udc_init;
+		usb_if.udc_register_gadget = usb30_udc_register_gadget;
+		usb_if.udc_start           = usb30_udc_start;
+		usb_if.udc_stop            = usb30_udc_stop;
+		usb_if.udc_endpoint_alloc  = usb30_udc_endpoint_alloc;
+		usb_if.udc_endpoint_free   = NULL;
+		usb_if.udc_request_alloc   = usb30_udc_request_alloc;
+		usb_if.udc_request_free    = usb30_udc_request_free;
+		usb_if.udc_request_queue   = usb30_udc_request_queue;
+#else
+		dprintf(CRITICAL, "usbcon: USB30_SUPPORT not enabled for DWC target\n");
 		return -1;
+#endif
+	} else {
+		usb_if.udc_init            = udc_init;
+		usb_if.udc_register_gadget = udc_register_gadget;
+		usb_if.udc_start           = udc_start;
+		usb_if.udc_stop            = udc_stop;
+		usb_if.udc_endpoint_alloc  = udc_endpoint_alloc;
+		usb_if.udc_endpoint_free   = udc_endpoint_free;
+		usb_if.udc_request_alloc   = udc_request_alloc;
+		usb_if.udc_request_free    = udc_request_free;
+		usb_if.udc_request_queue   = udc_request_queue;
+	}
 
-	if (udc_init(&usbcon_udc_device) < 0) {
+	if (usb_if.udc_init(&usbcon_udc_device) < 0) {
 		dprintf(CRITICAL, "usbcon: udc_init failed\n");
 		return -1;
 	}
 
-	usbcon_endpoints[0] = udc_endpoint_alloc(UDC_TYPE_BULK_IN, 512);
-	usbcon_endpoints[1] = udc_endpoint_alloc(UDC_TYPE_BULK_OUT, 512);
-	if (!usbcon_endpoints[0] || !usbcon_endpoints[1])
+	usbcon_endpoints[0] = usb_if.udc_endpoint_alloc(UDC_TYPE_BULK_IN, 512);
+	usbcon_endpoints[1] = usb_if.udc_endpoint_alloc(UDC_TYPE_BULK_OUT, 512);
+	if (!usbcon_endpoints[0] || !usbcon_endpoints[1]) {
+		dprintf(CRITICAL, "usbcon: endpoint alloc failed\n");
 		return -1;
+	}
 
-	usbcon_req_in = udc_request_alloc();
-	usbcon_req_out = udc_request_alloc();
-	if (!usbcon_req_in || !usbcon_req_out)
+	usbcon_req_in = usb_if.udc_request_alloc();
+	usbcon_req_out = usb_if.udc_request_alloc();
+	if (!usbcon_req_in || !usbcon_req_out) {
+		dprintf(CRITICAL, "usbcon: request alloc failed\n");
 		return -1;
+	}
 
-	if (udc_register_gadget(&usbcon_gadget) < 0)
+	if (usb_if.udc_register_gadget(&usbcon_gadget) < 0) {
+		dprintf(CRITICAL, "usbcon: gadget register failed\n");
 		return -1;
+	}
 
-	if (udc_start() < 0)
+	if (usb_if.udc_start() < 0) {
+		dprintf(CRITICAL, "usbcon: udc_start failed\n");
 		return -1;
+	}
+
+	dprintf(INFO, "usbcon: started (%s)\n", target_usb_controller());
 
 	tx_head = tx_tail = 0;
 	tx_pending = false;
@@ -242,22 +296,22 @@ void lk2nd_usbcon_stop(void)
 	usbcon_up = false;
 	usbcon_online = false;
 
-	udc_stop();
+	usb_if.udc_stop();
 
 	if (usbcon_req_in) {
-		udc_request_free(usbcon_req_in);
+		usb_if.udc_request_free(usbcon_req_in);
 		usbcon_req_in = NULL;
 	}
 	if (usbcon_req_out) {
-		udc_request_free(usbcon_req_out);
+		usb_if.udc_request_free(usbcon_req_out);
 		usbcon_req_out = NULL;
 	}
-	if (usbcon_endpoints[0]) {
-		udc_endpoint_free(usbcon_endpoints[0]);
+	if (usbcon_endpoints[0] && usb_if.udc_endpoint_free) {
+		usb_if.udc_endpoint_free(usbcon_endpoints[0]);
 		usbcon_endpoints[0] = NULL;
 	}
-	if (usbcon_endpoints[1]) {
-		udc_endpoint_free(usbcon_endpoints[1]);
+	if (usbcon_endpoints[1] && usb_if.udc_endpoint_free) {
+		usb_if.udc_endpoint_free(usbcon_endpoints[1]);
 		usbcon_endpoints[1] = NULL;
 	}
 }
