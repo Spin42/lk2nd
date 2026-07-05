@@ -31,6 +31,7 @@
 
 // Defined in app/aboot/aboot.c
 extern void cmd_continue(const char *arg, void *data, unsigned sz);
+extern int boot_linux_from_mmc(void);
 extern unsigned boot_into_recovery;
 extern int dgetc(char *c, bool wait);
 
@@ -263,8 +264,12 @@ static int cmd_slot(int argc, char **argv)
 		return -1;
 	}
 
-	printf("current slot: %c (offset 0x%llx)\n",
-	       lk2nd_boot_ab_get_slot(), lk2nd_boot_ab_get_offset());
+	if (!lk2nd_boot_ab_env_valid())
+		printf("no valid environment on storage - A/B boot disabled\n"
+		       "(defaults shown; use 'saveenv' to create the env)\n");
+	else
+		printf("current slot: %c (offset 0x%llx)\n",
+		       lk2nd_boot_ab_get_slot(), lk2nd_boot_ab_get_offset());
 	val = lk2nd_boot_ab_env_get("BOOT_ORDER");
 	printf("BOOT_ORDER:  %s\n", val ? val : "(unset)");
 	val = lk2nd_boot_ab_env_get("BOOT_A_LEFT");
@@ -276,10 +281,14 @@ static int cmd_slot(int argc, char **argv)
 
 static int cmd_boot(int argc, char **argv)
 {
+	/* Same sequence as an uninterrupted boot: extlinux scan first... */
 	lk2nd_boot();
 
-	/* Only returns if nothing bootable was found */
-	printf("no bootable file system found\n");
+	/* ...then the boot image following lk2nd in the boot partition */
+	printf("no bootable file system found, trying boot image\n");
+	boot_linux_from_mmc();
+
+	printf("no bootable kernel found\n");
 	return -1;
 }
 

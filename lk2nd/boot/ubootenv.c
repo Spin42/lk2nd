@@ -148,6 +148,12 @@ int uboot_env_init(struct uboot_env *env, const char *partition, uint64_t offset
 		free(buffer);
 		env->dirty = true;
 		dprintf(INFO, "ubootenv: CRC mismatch, initializing clean env (non-redundant)\n");
+
+		/* Parse (i.e. seed) the RAUC A/B boot variables */
+		uboot_env_parse_rauc_vars(env);
+
+		/* Usable in memory, but there was no valid env on storage */
+		return 1;
 	}
 
 	/* Parse RAUC A/B boot variables */

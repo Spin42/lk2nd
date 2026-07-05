@@ -55,6 +55,7 @@ static struct {
 	uint64_t boot_offset_b;  /* Configured offset for slot B (0 = no offset) */
 	uint64_t env_offset_a;  /* Offset for slot A from BOOT_A_OFFSET (0 = unset) */
 	uint64_t env_offset_b;  /* Offset for slot B from BOOT_B_OFFSET (0 = unset) */
+	bool env_valid;  /* A valid env was read from (or saved to) storage */
 } ab_state = {0};
 
 /* Parse a hex ("0x...") or decimal number */
@@ -197,6 +198,18 @@ void lk2nd_boot_ab_init(const char *partition, uint64_t offset, size_t size)
 	ab_state.size = size;
 	ab_state.initialized = true;
 
+	/*
+	 * Without a valid environment on storage there is nothing to do
+	 * RAUC-style boot with: A/B boot stays disabled and the standard
+	 * scan runs instead. The clean in-memory env is still accessible
+	 * (printenv/setenv), and 'saveenv' creates a valid one.
+	 */
+	ab_state.env_valid = (ret == 0);
+	if (!ab_state.env_valid) {
+		dprintf(INFO, "A/B boot: no valid environment found, A/B boot disabled\n");
+		return;
+	}
+
 	/* Optional per-slot offsets from the env, overriding compiled-in defaults */
 	ab_state.env_offset_a = parse_u64(uboot_env_get(&ab_state.env, "BOOT_A_OFFSET"));
 	ab_state.env_offset_b = parse_u64(uboot_env_get(&ab_state.env, "BOOT_B_OFFSET"));
@@ -229,6 +242,12 @@ int lk2nd_boot_ab_ensure_init(void)
 	return ab_state.initialized ? 0 : -1;
 }
 
+/* True when a valid env exists on storage (i.e. A/B boot is active) */
+bool lk2nd_boot_ab_env_valid(void)
+{
+	return ab_state.initialized && ab_state.env_valid;
+}
+
 /* Get an env variable value; NULL if unset or A/B not initialized */
 const char *lk2nd_boot_ab_env_get(const char *key)
 {
@@ -254,9 +273,18 @@ int lk2nd_boot_ab_env_set(const char *key, const char *value)
 /* Write the env back to storage */
 int lk2nd_boot_ab_env_save(void)
 {
+	int ret;
+
 	if (!ab_state.initialized)
 		return -1;
-	return uboot_env_save(&ab_state.env, ab_state.partition, ab_state.offset);
+
+	ret = uboot_env_save(&ab_state.env, ab_state.partition, ab_state.offset);
+	if (ret == 0 && !ab_state.env_valid) {
+		/* The env on storage is valid now; re-derive the A/B state */
+		ab_state.env_valid = true;
+		ab_state.current_slot = uboot_env_get_boot_slot(&ab_state.env);
+	}
+	return ret;
 }
 
 /* Print all key=value pairs in the env */
@@ -279,7 +307,7 @@ void lk2nd_boot_ab_env_print(void)
  */
 char lk2nd_boot_ab_get_slot(void)
 {
-	if (!ab_state.initialized)
+	if (!ab_state.initialized || !ab_state.env_valid)
 		return '\0';
 
 	return ab_state.current_slot;
@@ -294,7 +322,7 @@ void lk2nd_boot_ab_pre_boot(void)
 {
 	char next_slot;
 
-	if (!ab_state.initialized) {
+	if (!ab_state.initialized || !ab_state.env_valid) {
 		/* A/B not configured - skip A/B boot logic entirely */
 		return;
 	}
@@ -324,7 +352,7 @@ void lk2nd_boot_ab_pre_boot(void)
 /* Return the base device name used for boot (same as U-Boot env partition) */
 const char *lk2nd_boot_ab_get_base_device(void)
 {
-	if (!ab_state.initialized)
+	if (!ab_state.initialized || !ab_state.env_valid)
 		return NULL;
 	return ab_state.partition;
 }
@@ -353,7 +381,7 @@ bool lk2nd_boot_ab_advance_slot(void)
 {
 	char next;
 
-	if (!ab_state.initialized)
+	if (!ab_state.initialized || !ab_state.env_valid)
 		return false;
 
 	next = uboot_env_get_next_slot(&ab_state.env, ab_state.current_slot);
@@ -373,7 +401,7 @@ bool lk2nd_boot_ab_advance_slot(void)
  */
 uint64_t lk2nd_boot_ab_get_offset(void)
 {
-	if (!ab_state.initialized)
+	if (!ab_state.initialized || !ab_state.env_valid)
 		return 0;
 
 	if (ab_state.current_slot == 'A')

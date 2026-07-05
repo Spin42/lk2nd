@@ -40,6 +40,7 @@ bool lk2nd_boot_ab_advance_slot(void);
 int lk2nd_boot_ab_ensure_init(void);
 
 /* U-Boot environment access (for the shell etc.) */
+bool lk2nd_boot_ab_env_valid(void);
 const char *lk2nd_boot_ab_env_get(const char *key);
 int lk2nd_boot_ab_env_set(const char *key, const char *value);
 int lk2nd_boot_ab_env_save(void);

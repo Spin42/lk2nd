@@ -46,7 +46,9 @@ struct uboot_env {
 	int boot_b_left;         /* BOOT_B_LEFT counter */
 };
 
-/* Initialize U-Boot environment from partition at given offset */
+/* Initialize U-Boot environment from partition at given offset.
+ * Returns 0 when a valid env was read, 1 when no valid env was found
+ * (a clean one is set up in memory), negative on error. */
 int uboot_env_init(struct uboot_env *env, const char *partition, uint64_t offset, size_t size);
 
 /* Get environment variable value (returns pointer into env->data) */
