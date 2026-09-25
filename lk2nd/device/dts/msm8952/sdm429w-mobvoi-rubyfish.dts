@@ -1,0 +1,47 @@
+// SPDX-License-Identifier: BSD-3-Clause
+#include <skeleton64.dtsi>
+#include <lk2nd.dtsi>
+
+/*
+ * Mobvoi TicWatch Pro 3 GPS — the non-LTE sibling of `rover`.
+ *
+ * Mobvoi's downstream tree calls this board `rubyfish`. It is the same
+ * hardware as `rover`: rubyfish.dts pulls in every rover-*.dtsi fragment
+ * (panel, touchscreen, Bluetooth, WLAN, audio, GNSS, NFC, keys, vibrator)
+ * and the same 595 mAh battery profile. The only difference is the SoC
+ * part number: SDA429W has no modem, so the bootloader reports
+ * qcom,msm-id 437 instead of rover's 416, with an identical board-id.
+ *
+ * Mainline has one device tree for both, so this entry exists only to get
+ * the stock bootloader to select lk2nd on a GPS watch.
+ *
+ * Like `rover`, this device needs a custom dtbo flashed before lk2nd will
+ * run. See sdm429w-mobvoi-rover.dts.
+ */
+/ {
+	qcom,msm-id = <QCOM_ID_SDA429W 0x00>;
+	qcom,board-id = <0x10b 0x08>;
+	/* Bootloader appears to really want to access symbols */
+	__symbols__ {};
+};
+
+&lk2nd {
+	model = "Mobvoi TicWatch Pro 3 GPS (rubyfish)";
+	compatible = "mobvoi,rubyfish", "mobvoi,rover";
+
+	lk2nd,dtb-files = "sdm429w-mobvoi-rover";
+
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		down {
+			lk2nd,code = <KEY_VOLUMEDOWN>;
+			gpios = <&tlmm 48 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+		};
+
+		power {
+			lk2nd,code = <KEY_POWER>;
+			gpios = <&pmic_pon GPIO_PMIC_PWRKEY 0>;
+		};
+	};
+};

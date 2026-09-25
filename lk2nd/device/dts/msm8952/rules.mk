@@ -26,6 +26,8 @@ ADTBS += \
 	$(LOCAL_DIR)/sdm429-lenovo-tbx505x.dtb \
 	$(LOCAL_DIR)/sdm429-samsung-gtowifi.dtb \
 	$(LOCAL_DIR)/sdm429w-fossil-hoki.dtb \
+	$(LOCAL_DIR)/sdm429w-mobvoi-rover.dtb \
+	$(LOCAL_DIR)/sdm429w-mobvoi-rubyfish.dtb \
 	$(LOCAL_DIR)/sdm439-qrd-2.dtb \
 	$(LOCAL_DIR)/sdm439-xiaomi-olive.dtb \
 	$(LOCAL_DIR)/qm215-mtp.dtb \
