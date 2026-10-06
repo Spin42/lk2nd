@@ -76,12 +76,20 @@ int uboot_env_init(struct uboot_env *env, const char *partition, uint64_t offset
 		return -1;
 	}
 
-	/* Allocate buffer for environment (header + data) */
-	buffer = malloc(size);
+	/*
+	 * Allocate buffer for environment (header + data).
+	 *
+	 * The buffer is the target of a DMA read, so it must start and end on
+	 * cache line boundaries: the cache maintenance done around the
+	 * transfer works on whole lines, and a line shared with a neighbouring
+	 * heap block can write stale data back over the end of the buffer.
+	 */
+	buffer = memalign(CACHE_LINE, ROUNDUP(size, CACHE_LINE));
 	if (!buffer) {
 		bio_close(bdev);
 		return -1;
 	}
+	memset(buffer, 0, ROUNDUP(size, CACHE_LINE));
 
 	/* Read environment from partition */
 	ret = bio_read(bdev, buffer, offset, size);
