@@ -138,13 +138,18 @@ static bool resolve_base_device(const char *spec, char *out, size_t out_len)
 		}
 	}
 
-	/* 3) Search by GPT label */
+	/*
+	 * 3) Search by GPT label
+	 *
+	 * Don't skip non-leaf devices: the partition holding the environment
+	 * is usually the one the slot disk image is written to, so it has a
+	 * nested partition table and sub-devices. Only partition devices carry
+	 * a label, so the match is unambiguous.
+	 */
 	{
 		struct bdev_struct *bdevs = bio_get_bdevs();
 		bdev_t *iter;
 		list_for_every_entry(&bdevs->list, iter, bdev_t, node) {
-			if (!iter->is_leaf)
-				continue;
 			if (iter->label && !strcmp(iter->label, spec)) {
 				strlcpy(out, iter->name, out_len);
 				return true;
